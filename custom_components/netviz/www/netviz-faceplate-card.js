@@ -23,13 +23,11 @@ const LINK_COLORS = {
 };
 
 class NetvizFaceplateCard extends HTMLElement {
-  static getConfigElement() {
-    return document.createElement("hui-generic-entity-row");
-  }
-
-  static getStubConfig() {
-    return { faceplate: "" };
-  }
+  // Apzināti bez getConfigElement/getStubConfig: vizuālā redaktora šai kartei
+  // nav, un `hui-generic-entity-row` atgriešana ir rindas elements, nevis
+  // redaktors - tas salauza redaktoru, un stub konfigurācija ar tukšu
+  // `faceplate` uzreiz krita setConfig validācijā. Bez šīm metodēm HA korekti
+  // atkāpjas uz YAML redaktoru.
 
   setConfig(config) {
     if (!config.device && !config.faceplate) {
@@ -78,22 +76,56 @@ class NetvizFaceplateCard extends HTMLElement {
     return undefined;
   }
 
-  /** Visas šīs ierīces netviz entītijas, sagrupētas pēc porta un metrikas. */
-  _portStates() {
+  /**
+   * {porta_id: {metrika: entity_id}}, keširots.
+   *
+   * `set hass` HA izsauc pie JEBKURAS stāvokļa maiņas mājā, tāpēc pilns
+   * hass.entities skenējums katrā reizē ir dārgs - uz 48 portu switch'a tur ir
+   * 300+ mūsu entītiju plus viss pārējais. Reģistrs mainās reti, stāvokļi bieži.
+   */
+  _entityMap() {
     const hass = this._hass;
+    const expected = Object.keys(this._portNodes || {}).length;
+    if (
+      this._map &&
+      this._mapSource === hass.entities &&
+      Object.keys(this._map).length >= expected
+    ) {
+      return this._map;
+    }
     const deviceId =
       this._config.device ||
       (hass.entities[this._faceplateId] || {}).device_id;
-    const grouped = {};
+    const map = {};
     for (const entry of Object.values(hass.entities || {})) {
       if (entry.platform !== "netviz") continue;
       if (deviceId && entry.device_id !== deviceId) continue;
       const state = hass.states[entry.entity_id];
-      if (!state) continue;
-      const { port, metric } = state.attributes || {};
+      const { port, metric } = (state && state.attributes) || {};
       if (!port || !metric) continue;
-      if (!grouped[port]) grouped[port] = {};
-      grouped[port][metric] = state;
+      if (!map[port]) map[port] = {};
+      map[port][metric] = entry.entity_id;
+    }
+    // Tukšu vai nepilnu karti nekešojam: startējot daļa stāvokļu vēl var nebūt
+    // ienākuši, un tad atribūtu pēc tiem nevar nolasīt.
+    if (Object.keys(map).length >= expected && expected > 0) {
+      this._mapSource = hass.entities;
+      this._map = map;
+    }
+    return map;
+  }
+
+  /** Visas šīs ierīces netviz entītijas, sagrupētas pēc porta un metrikas. */
+  _portStates() {
+    const hass = this._hass;
+    const grouped = {};
+    for (const [port, metrics] of Object.entries(this._entityMap())) {
+      for (const [metric, entityId] of Object.entries(metrics)) {
+        const state = hass.states[entityId];
+        if (!state) continue;
+        if (!grouped[port]) grouped[port] = {};
+        grouped[port][metric] = state;
+      }
     }
     return grouped;
   }
@@ -101,6 +133,8 @@ class NetvizFaceplateCard extends HTMLElement {
   _build(geometry, faceplateId) {
     this._faceplateId = faceplateId;
     this._geometryId = faceplateId;
+    this._map = null;        // cita ierīce vai cita ģeometrija - keša ārā
+    this._mapSource = null;
     const width = geometry.width || 800;
     const height = geometry.height || 100;
 
@@ -287,4 +321,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.1.0 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.2.0 ", "background:#2ea3f2;color:#fff", "");

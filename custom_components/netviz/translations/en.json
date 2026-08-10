@@ -9,7 +9,8 @@
           "model": "Model",
           "snmp_version": "SNMP version",
           "community": "Community",
-          "port": "Port"
+          "port": "Port",
+          "protocol": "Web interface scheme"
         }
       },
       "v3": {
@@ -38,10 +39,12 @@
         "data": {
           "scan_interval": "Scan interval (s)",
           "entities": "Entities per port",
-          "vlans": "Read VLAN information"
+          "vlans": "Read VLAN information",
+          "protocol": "Web interface scheme"
         },
         "data_description": {
-          "entities": "Each choice multiplies by port count. Six fields on 48 ports is ~290 entities."
+          "entities": "Each choice multiplies by port count. Six fields on 48 ports is ~290 entities.",
+          "protocol": "Only for the link to the switch web interface on the device page. AOS-S is often http."
         }
       }
     }

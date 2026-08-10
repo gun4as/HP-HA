@@ -21,6 +21,14 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 
+def _card_mtime(path: Path) -> int | None:
+    """Kartes faila mtime, vai None, ja faila nav. Blokējošs - izpildītājam."""
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 async def _register_card(hass: HomeAssistant) -> None:
     """Pasniedz faceplate karti no integrācijas mapes.
 
@@ -30,7 +38,9 @@ async def _register_card(hass: HomeAssistant) -> None:
     if hass.data.get(f"{DOMAIN}_card_registered"):
         return
     path = Path(__file__).parent / "www" / CARD_FILENAME
-    if not path.is_file():
+    # stat() un is_file() ir blokējoši izsaukumi - vienā gājumā izpildītājā
+    mtime = await hass.async_add_executor_job(_card_mtime, path)
+    if mtime is None:
         _LOGGER.warning("kartes fails nav atrasts: %s", path)
         return
     await hass.http.async_register_static_paths(
@@ -39,13 +49,15 @@ async def _register_card(hass: HomeAssistant) -> None:
     if "frontend" in hass.config.components:
         from homeassistant.components.frontend import add_extra_js_url
 
-        add_extra_js_url(hass, f"{CARD_URL}?v={path.stat().st_mtime_ns}")
+        add_extra_js_url(hass, f"{CARD_URL}?v={mtime}")
     hass.data[f"{DOMAIN}_card_registered"] = True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: NetvizConfigEntry) -> bool:
     try:
-        model = load_model(entry.data[CONF_MODEL])
+        # load_model atver failu - izpildītājā, citādi HA met brīdinājumu par
+        # blokējošu I/O event loop'ā
+        model = await hass.async_add_executor_job(load_model, entry.data[CONF_MODEL])
     except ModelNotFound as err:
         _LOGGER.error("modelis nav atrasts: %s", err)
         return False

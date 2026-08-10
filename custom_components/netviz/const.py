@@ -8,6 +8,7 @@ DOMAIN: Final = "netviz"
 
 CONF_MODEL: Final = "model"
 CONF_VERSION: Final = "snmp_version"
+CONF_PROTOCOL: Final = "protocol"
 CONF_COMMUNITY: Final = "community"
 CONF_AUTH_PROTOCOL: Final = "auth_protocol"
 CONF_AUTH_KEY: Final = "auth_key"
@@ -20,6 +21,11 @@ DEFAULT_PORT: Final = 161
 DEFAULT_SCAN_INTERVAL: Final = 30
 DEFAULT_TIMEOUT: Final = 4
 DEFAULT_RETRIES: Final = 2
+
+# Switch pārvaldības saskarnes shēma - tikai `configuration_url` vajadzībām.
+# AOS-S bieži nāk ar http un bez sertifikāta, tāpēc noklusējums nav https.
+PROTOCOL_OPTIONS: Final = ["http", "https"]
+DEFAULT_PROTOCOL: Final = "http"
 
 # Metrikas, ko var ieslēgt uz portu. Noklusējums apzināti nav "viss".
 METRIC_LINK: Final = "link"
@@ -58,7 +64,10 @@ DEFAULT_METRICS: Final = [
 # Metrikas, kas ir jēdzīgas tikai PoE portiem
 POE_METRICS: Final = {METRIC_POE_POWER, METRIC_POE_STATUS}
 
-SNMP_VERSIONS: Final = ["1", "2c", "3"]
+# SNMPv1 apzināti nav sarakstā: walk() lieto GETBULK, kas SNMPv1 neeksistē, un
+# v1 viens neeksistējošs OID atgriež noSuchName visam GET pieprasījumam. Uz
+# AOS-S v2c un v3 abi ir pieejami, tāpēc atsevišķs koda ceļš nav vērts.
+SNMP_VERSIONS: Final = ["2c", "3"]
 AUTH_PROTOCOL_OPTIONS: Final = ["sha", "md5"]
 PRIV_PROTOCOL_OPTIONS: Final = ["aes", "aes192", "aes256", "des"]
 

@@ -58,13 +58,14 @@ OID_IF_HCOUT = "1.3.6.1.2.1.31.1.1.1.10"
 
 # --- POWER-ETHERNET-MIB (RFC 3621) ---
 OID_PETH_DETECT = "1.3.6.1.2.1.105.1.1.1.6"
-OID_PETH_CLASS = "1.3.6.1.2.1.105.1.1.1.5"
 OID_PETH_MAIN_POWER = "1.3.6.1.2.1.105.1.3.1.1.2"
 OID_PETH_MAIN_CONS = "1.3.6.1.2.1.105.1.3.1.1.4"
 
 # --- HP-ICF-POE-MIB (ActualPower ir MILIVATOS) ---
 OID_HP_POE_MW = "1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8"
-OID_HP_PSE_AVAIL = "1.3.6.1.4.1.11.2.14.11.1.9.1.6.1.4"
+# 1.3.6.1.4.1.11.2.14.11.1.9.1.6.1.4 apzināti netiek lasīts: pret JL357A tas
+# atgriež 370, t.i. maksimālo, nevis atlikušo jaudu (UI tajā pašā mirklī rādīja
+# 346 W atlikuma). Atlikums ir poe_budget - poe_used.
 
 # --- BRIDGE / Q-BRIDGE ---
 OID_BASEPORT_IFINDEX = "1.3.6.1.2.1.17.1.4.1.2"
@@ -76,7 +77,12 @@ OID_VLAN_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
 OID_SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
 OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
-OID_ENT_SERIAL = "1.3.6.1.2.1.47.1.1.1.1.11.1"
+# ENTITY-MIB entPhysicalSerialNum. Tabula, nevis `.1`: uz AOS-S šasija ir
+# indekss 1001, un tabulā ir arī moduļu un barošanas bloku ieraksti, no kuriem
+# daļa ir tukši vai satur ražotāja vietturi.
+OID_ENT_SERIAL_TABLE = "1.3.6.1.2.1.47.1.1.1.1.11"
+# Vērtības, kas formāli nav tukšas, bet seriālnumurs nav
+SERIAL_PLACEHOLDERS = {"not avail", "not available", "none", "n/a", "unknown", "0"}
 OID_CPU = "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0"
 OID_MEM_FREE = "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.6.1"
 OID_MEM_USED = "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.7.1"
@@ -127,8 +133,10 @@ def _auth_data(creds: SnmpCredentials):
             authProtocol=AUTH_PROTOCOLS.get(creds.auth_protocol, usmHMACSHAAuthProtocol),
             privProtocol=PRIV_PROTOCOLS.get(creds.priv_protocol, usmAesCfb128Protocol),
         )
-    # mpModel 0 = SNMPv1, 1 = SNMPv2c
-    return CommunityData(creds.community, mpModel=0 if creds.version == "1" else 1)
+    # mpModel 1 = SNMPv2c. SNMPv1 (mpModel 0) netiek atbalstīts: walk() lieto
+    # GETBULK, kas ir tikai v2c+, un v1 GET ar vienu neeksistējošu OID atgriež
+    # noSuchName visam pieprasījumam, nevis per-varbind.
+    return CommunityData(creds.community, mpModel=1)
 
 
 def _numeric(oid) -> str:
@@ -163,6 +171,7 @@ class SnmpClient:
         self._lock = asyncio.Lock()
         self._prev: _Snapshot | None = None
         self._vlan_cache: tuple[float, dict[int, dict]] | None = None
+        self._unmatched: frozenset[str] | None = None
 
     async def _target(self) -> UdpTransportTarget:
         if self._transport is None:
@@ -223,6 +232,14 @@ class SnmpClient:
         )
         if err_ind:
             raise SnmpConnectionError(str(err_ind))
+        if err_stat:
+            # Pieprasījums kā vienība neizdevās (tooBig, genErr, ...). Varbind
+            # vērtības tādā gadījumā nav lietojamas, un tās klusi atgriezt
+            # nozīmētu rādīt None visiem sistēmas sensoriem bez pēdas logā.
+            raise SnmpConnectionError(
+                f"GET neizdevās: {err_stat.prettyPrint()} "
+                f"(varbind {int(_idx) if _idx else '?'})"
+            )
         out: dict[str, object] = {}
         for oid, value in binds:
             name = value.__class__.__name__
@@ -233,18 +250,35 @@ class SnmpClient:
 
     # ------------------------------------------------------------------ augstāk
 
+    async def _serial(self) -> str | None:
+        """Šasijas seriālnumurs no entPhysicalSerialNum.
+
+        Ņem pirmo lietojamo vērtību augošā indeksu secībā, jo šasija ENTITY-MIB
+        tabulā vienmēr ir pirms tajā iespraustajiem moduļiem. Izmet tukšos, kā
+        arī ražotāja vietturus un moduļu seriālnumurus ar liekām atstarpēm.
+        """
+        try:
+            table = await self.walk(OID_ENT_SERIAL_TABLE)
+        except SnmpConnectionError:
+            _LOGGER.debug("entPhysicalSerialNum nav pieejams", exc_info=True)
+            return None
+        for index in sorted(table, key=lambda k: [int(p) for p in k.split(".")]):
+            value = str(table[index]).strip()
+            if value and value.lower() not in SERIAL_PLACEHOLDERS:
+                return value
+        return None
+
     async def probe(self) -> dict[str, str | None]:
         """Config flow validācijai. Met SnmpConnectionError, ja agents klusē."""
         async with self._lock:
-            data = await self.get_many(
-                [OID_SYS_NAME, OID_SYS_DESCR, OID_ENT_SERIAL]
-            )
-        if not data:
-            raise SnmpConnectionError("agents neatbildēja")
+            data = await self.get_many([OID_SYS_NAME, OID_SYS_DESCR])
+            if not data:
+                raise SnmpConnectionError("agents neatbildēja")
+            serial = await self._serial()
         return {
-            "name": str(data.get(OID_SYS_NAME, "")) or None,
-            "descr": str(data.get(OID_SYS_DESCR, "")) or None,
-            "serial": str(data.get(OID_ENT_SERIAL, "")) or None,
+            "name": str(data.get(OID_SYS_NAME, "")).strip() or None,
+            "descr": str(data.get(OID_SYS_DESCR, "")).strip() or None,
+            "serial": serial,
         }
 
     async def _vlans(self, ttl: float = 300.0) -> dict[int, dict]:
@@ -311,7 +345,6 @@ class SnmpClient:
             hcin = await self.walk(OID_IF_HCIN)
             hcout = await self.walk(OID_IF_HCOUT)
             detect = await self.walk(OID_PETH_DETECT)
-            pclass = await self.walk(OID_PETH_CLASS)
             poe_mw = await self.walk(OID_HP_POE_MW)
             vlan_map = await self._vlans() if with_vlans else {}
 
@@ -327,7 +360,6 @@ class SnmpClient:
             )
             main_power = await self.walk(OID_PETH_MAIN_POWER)
             main_cons = await self.walk(OID_PETH_MAIN_CONS)
-            pse_avail = await self.walk(OID_HP_PSE_AVAIL)
 
             now = loop.time()
             snap = _Snapshot(ts=now)
@@ -365,7 +397,9 @@ class SnmpClient:
                     "link": _as_int(oper.get(key)) == 1,
                     "admin_up": _as_int(admin.get(key)) == 1,
                     "speed": _as_int(speed.get(key)),
-                    "alias": str(alias.get(key, "") or ""),
+                    # AOS-S atdod ifAlias tā, kā tas ierakstīts konfigurācijā,
+                    # un tur mēdz būt atstarpe priekšā
+                    "alias": str(alias.get(key, "") or "").strip(),
                     "rx_bytes": rx,
                     "tx_bytes": tx,
                     "rx_bps": rx_bps,
@@ -380,7 +414,6 @@ class SnmpClient:
                     port["poe_power"] = (
                         round(milliwatts / 1000, 1) if milliwatts is not None else None
                     )
-                    port["poe_class"] = _as_int(pclass.get(pidx))
 
                 vinfo = vlan_map.get(ifindex)
                 if vinfo:
@@ -396,6 +429,27 @@ class SnmpClient:
 
             self._prev = snap
 
+            # Ja modeļa `ifname` nesakrīt ar to, ko atdod switch, porti klusi
+            # pazustu un visas entītijas kļūtu nepieejamas bez paskaidrojuma.
+            # Brīdinām, bet tikai kad kopa mainās - citādi spams ik 30 sekundes.
+            unmatched = frozenset(
+                str(p["id"]) for p in ports if str(p["id"]) not in out_ports
+            )
+            if unmatched != self._unmatched:
+                if unmatched:
+                    _LOGGER.warning(
+                        "%s: %d no %d modeļa portiem nesakrita ar switch'a ifName; "
+                        "nesakritušie: %s; switch atdeva: %s",
+                        self._creds.host,
+                        len(unmatched),
+                        len(ports),
+                        sorted(unmatched)[:10],
+                        sorted(by_name)[:10],
+                    )
+                elif self._unmatched:
+                    _LOGGER.info("%s: visi modeļa porti atkal sakrīt", self._creds.host)
+                self._unmatched = unmatched
+
             uptime = _as_int(system_raw.get(OID_SYS_UPTIME))
             system = {
                 "name": str(system_raw.get(OID_SYS_NAME, "")) or None,
@@ -406,7 +460,6 @@ class SnmpClient:
                 "mem_used": _as_int(system_raw.get(OID_MEM_USED)),
                 "poe_budget": _as_int(next(iter(main_power.values()), None)),
                 "poe_used": _as_int(next(iter(main_cons.values()), None)),
-                "poe_available": _as_int(next(iter(pse_avail.values()), None)),
                 "ports_up": sum(1 for p in out_ports.values() if p["link"]),
                 "ports_total": len(out_ports),
             }

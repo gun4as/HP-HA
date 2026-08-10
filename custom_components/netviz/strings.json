@@ -9,7 +9,8 @@
           "model": "Modelis",
           "snmp_version": "SNMP versija",
           "community": "Community",
-          "port": "Ports"
+          "port": "Ports",
+          "protocol": "Web saskarnes shēma"
         }
       },
       "v3": {
@@ -38,10 +39,12 @@
         "data": {
           "scan_interval": "Aptaujas intervāls (s)",
           "entities": "Entītijas uz portu",
-          "vlans": "Lasīt VLAN informāciju"
+          "vlans": "Lasīt VLAN informāciju",
+          "protocol": "Web saskarnes shēma"
         },
         "data_description": {
-          "entities": "Katra izvēle reizinās ar portu skaitu. 48 portiem seši lauki ir ~290 entītijas."
+          "entities": "Katra izvēle reizinās ar portu skaitu. 48 portiem seši lauki ir ~290 entītijas.",
+          "protocol": "Tikai saitei uz switch'a web saskarni ierīces kartītē. AOS-S bieži ir uz http."
         }
       }
     }
