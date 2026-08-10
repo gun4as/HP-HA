@@ -1,11 +1,10 @@
 {
   "domain": "netviz",
   "name": "netviz",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "codeowners": ["@gun4as"],
   "config_flow": true,
-  "dependencies": ["http"],
-  "after_dependencies": ["frontend"],
+  "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/gun4as/HP-HA",
   "issue_tracker": "https://github.com/gun4as/HP-HA/issues",
   "integration_type": "device",

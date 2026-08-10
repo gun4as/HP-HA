@@ -24,7 +24,16 @@ Tikai lasīšana. Nekādu SNMP SET — read-only community vai v3 lietotājs pie
 4. **Iestatījumi → Ierīces un pakalpojumi → Pievienot integrāciju → netviz**
 
 Karti pievienot ar roku Lovelace resursos **nevajag** — integrācija to reģistrē
-pati caur `add_extra_js_url`.
+pati caur `add_extra_js_url`. Ja pēc pārstarta karte tomēr met `Custom element
+doesn't exist: netviz-faceplate-card`, pārbaudi pēc kārtas:
+
+1. Vai fails ir pieejams: `http://<tava-ha>:8123/netviz/netviz-faceplate-card.js`.
+   Ja tas dod 404, HACS nav nolejupielādējis `www/` mapi — pārlādē integrāciju.
+2. `Ctrl+Shift+R` pārlūkā. Resursu saraksts tiek kešots, un jauns skripts
+   parādās tikai pēc pilnas pārlādes.
+3. Ja fails atveras, bet karte joprojām nav, pievieno resursu ar roku:
+   **Iestatījumi → Paneļi → trīs punkti → Resursi → Pievienot**, URL
+   `/netviz/netviz-faceplate-card.js`, tips **JavaScript Module**.
 
 ### Atkarības
 

@@ -41,15 +41,30 @@ async def _register_card(hass: HomeAssistant) -> None:
     # stat() un is_file() ir blokējoši izsaukumi - vienā gājumā izpildītājā
     mtime = await hass.async_add_executor_job(_card_mtime, path)
     if mtime is None:
-        _LOGGER.warning("kartes fails nav atrasts: %s", path)
+        _LOGGER.warning(
+            "kartes fails nav atrasts: %s - faceplate karte nebūs pieejama", path
+        )
         return
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, str(path), cache_headers=False)]
     )
-    if "frontend" in hass.config.components:
+    # `frontend` ir manifest.json dependencies, tāpēc šeit tas jau ir ielādēts.
+    # Iepriekš bija after_dependencies un `if "frontend" in components` - ja tas
+    # nosacījums neizpildījās, fails bija pieejams, bet skripts panelī netika
+    # ievietots, un logā par to nebija nekā. Karte tad krita ar
+    # "Custom element doesn't exist".
+    try:
         from homeassistant.components.frontend import add_extra_js_url
 
         add_extra_js_url(hass, f"{CARD_URL}?v={mtime}")
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception(
+            "kartes JS neizdevās pievienot frontend'am; failu var pievienot ar "
+            "roku Lovelace resursos kā %s",
+            CARD_URL,
+        )
+        return
+    _LOGGER.info("faceplate karte reģistrēta: %s?v=%s", CARD_URL, mtime)
     hass.data[f"{DOMAIN}_card_registered"] = True
 
 
