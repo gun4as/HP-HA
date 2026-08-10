@@ -53,6 +53,46 @@ async def _register_card(hass: HomeAssistant) -> None:
     hass.data[f"{DOMAIN}_card_registered"] = True
 
 
+async def _reconcile_identity(
+    hass: HomeAssistant, entry: NetvizConfigEntry, client: SnmpClient
+) -> None:
+    """Pārliek unique_id no adreses uz seriālnumuru, ja tas vēl nav noticis.
+
+    Līdz 0.2.0 seriālnumurs tika prasīts kā `entPhysicalSerialNum.1`, bet AOS-S
+    šasija ir indeksā 1001, tāpēc atbilde bija NoSuchInstance un unique_id
+    atkāpās uz host:port. Ierakstiem, kas izveidoti ar veco kodu, to var
+    izlabot klusi - tas ir daudz labāk, nekā likt dzēst integrāciju un
+    pievienot no jauna, zaudējot entītiju ID un vēsturi.
+    """
+    if entry.data.get("serial"):
+        return
+    try:
+        info = await client.probe()
+    except SnmpConnectionError:
+        return
+    if not (serial := info.get("serial")) or entry.unique_id == serial:
+        return
+    # Ja kāds jau ir pievienojis to pašu switch'u otrreiz, divi ieraksti ar
+    # vienu unique_id nav pieļaujami - labāk atstājam kā ir un pasakām.
+    if any(
+        other.unique_id == serial
+        for other in hass.config_entries.async_entries(DOMAIN)
+        if other.entry_id != entry.entry_id
+    ):
+        _LOGGER.warning(
+            "seriālnumurs %s jau pieder citam ierakstam, unique_id atstāts kā %s",
+            serial,
+            entry.unique_id,
+        )
+        return
+    _LOGGER.info(
+        "unique_id pārlikts no %s uz seriālnumuru %s", entry.unique_id, serial
+    )
+    hass.config_entries.async_update_entry(
+        entry, unique_id=serial, data={**entry.data, "serial": serial}
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: NetvizConfigEntry) -> bool:
     try:
         # load_model atver failu - izpildītājā, citādi HA met brīdinājumu par
@@ -74,6 +114,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: NetvizConfigEntry) -> bo
     except SnmpConnectionError as err:
         client.close()
         raise ConfigEntryNotReady(f"{entry.data[CONF_HOST]}: {err}") from err
+
+    # Pirms platformu ielādes, lai entītijas uzreiz dabū pareizo serial_number.
+    # Un pirms update listener reģistrācijas, lai async_update_entry neizraisītu
+    # pārlādi tieši setup vidū.
+    await _reconcile_identity(hass, entry, client)
 
     entry.runtime_data = coordinator
     await _register_card(hass)
