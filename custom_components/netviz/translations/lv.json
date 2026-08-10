@@ -1,0 +1,82 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "netviz",
+        "description": "Switch SNMP piekļuve. Pietiek ar read-only.",
+        "data": {
+          "host": "Adrese",
+          "model": "Modelis",
+          "snmp_version": "SNMP versija",
+          "community": "Community",
+          "port": "Ports"
+        }
+      },
+      "v3": {
+        "title": "SNMPv3",
+        "data": {
+          "username": "Lietotājvārds",
+          "auth_protocol": "Autentifikācijas protokols",
+          "auth_key": "Autentifikācijas atslēga",
+          "priv_protocol": "Šifrēšanas protokols",
+          "priv_key": "Šifrēšanas atslēga"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Agents neatbild. Pārbaudi adresi, community un vai SNMP ir ieslēgts.",
+      "unknown": "Negaidīta kļūda"
+    },
+    "abort": {
+      "already_configured": "Šis switch jau ir pievienots"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "netviz iestatījumi",
+        "data": {
+          "scan_interval": "Aptaujas intervāls (s)",
+          "entities": "Entītijas uz portu",
+          "vlans": "Lasīt VLAN informāciju"
+        },
+        "data_description": {
+          "entities": "Katra izvēle reizinās ar portu skaitu. 48 portiem seši lauki ir ~290 entītijas."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "port_link": { "name": "{port} link" }
+    },
+    "sensor": {
+      "port_speed": { "name": "{port} speed" },
+      "port_rx_rate": { "name": "{port} RX" },
+      "port_tx_rate": { "name": "{port} TX" },
+      "port_rx_total": { "name": "{port} RX total" },
+      "port_tx_total": { "name": "{port} TX total" },
+      "port_poe_power": { "name": "{port} PoE power" },
+      "port_poe_status": {
+        "name": "{port} PoE status",
+        "state": {
+          "disabled": "Izslēgts",
+          "searching": "Meklē",
+          "delivering": "Padod jaudu",
+          "fault": "Kļūda",
+          "test": "Tests",
+          "other_fault": "Cita kļūda",
+          "unknown": "Nezināms"
+        }
+      },
+      "port_pvid": { "name": "{port} PVID" },
+      "port_alias": { "name": "{port} apraksts" },
+      "cpu": { "name": "CPU" },
+      "uptime": { "name": "Uptime" },
+      "poe_used": { "name": "PoE patēriņš" },
+      "poe_budget": { "name": "PoE budžets" },
+      "ports_up": { "name": "Aktīvie porti" },
+      "faceplate": { "name": "Faceplate" }
+    }
+  }
+}

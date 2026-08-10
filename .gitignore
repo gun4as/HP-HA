@@ -1,0 +1,32 @@
+# --- neapstrādāti SNMP snapshot'i ---------------------------------------------
+# capture_fixture.py izvads satur hostname, seriālnumurus, portu aprakstus ar
+# iekārtu nosaukumiem un VLAN nosaukumus. Repozitorijā iet TIKAI sanitizētā
+# versija, ko izlaiž caur tools/sanitize_fixture.py.
+*-live.json
+probe-raw.json
+*.snmpwalk
+*.snmprec.raw
+
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# --- testi --------------------------------------------------------------------
+.coverage
+htmlcov/
+
+# --- redaktori un OS ----------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# --- iepakojumi ---------------------------------------------------------------
+*.tar.gz
+*.zip

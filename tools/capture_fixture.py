@@ -1,0 +1,146 @@
+"""Noņem pilnu SNMP snapshot'u no īsta switch'a un saglabā kā testu fixture.
+
+Tikai lasīšana. Ņem tieši tos OID, ko lieto snmp.py:poll() un probe(), un
+divus skaitītāju mērījumus ar pauzi, lai testējams arī rx_bps/tx_bps rēķins.
+
+Izvads NEIET repozitorijā - izlaid to caur tools/sanitize_fixture.py.
+
+    python capture_fixture.py 192.0.2.10 public tests/fixtures/jl357a-live.json
+"""
+
+import asyncio
+import base64
+import json
+import sys
+from pathlib import Path
+
+from pysnmp.hlapi.v3arch.asyncio import (
+    CommunityData,
+    ContextData,
+    ObjectIdentity,
+    ObjectType,
+    SnmpEngine,
+    UdpTransportTarget,
+    bulk_walk_cmd,
+    get_cmd,
+)
+
+# tabulas, kuras poll() novalka; raw=True tām, kur vērtība ir bitmape
+WALK_OIDS = {
+    "1.3.6.1.2.1.2.2.1.2": ("ifDescr", False),
+    "1.3.6.1.2.1.2.2.1.7": ("ifAdminStatus", False),
+    "1.3.6.1.2.1.2.2.1.8": ("ifOperStatus", False),
+    "1.3.6.1.2.1.31.1.1.1.1": ("ifName", False),
+    "1.3.6.1.2.1.31.1.1.1.15": ("ifHighSpeed", False),
+    "1.3.6.1.2.1.31.1.1.1.18": ("ifAlias", False),
+    "1.3.6.1.2.1.31.1.1.1.6": ("ifHCInOctets", False),
+    "1.3.6.1.2.1.31.1.1.1.10": ("ifHCOutOctets", False),
+    "1.3.6.1.2.1.105.1.1.1.5": ("pethPsePortClass", False),
+    "1.3.6.1.2.1.105.1.1.1.6": ("pethPsePortDetectionStatus", False),
+    "1.3.6.1.2.1.105.1.3.1.1.2": ("pethMainPsePower", False),
+    "1.3.6.1.2.1.105.1.3.1.1.4": ("pethMainPseConsumptionPower", False),
+    "1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8": ("hpicfPoePethPsePortActualPower", False),
+    "1.3.6.1.4.1.11.2.14.11.1.9.1.6.1.4": ("hpicfPoePethPseAvail", False),
+    "1.3.6.1.2.1.17.1.4.1.2": ("dot1dBasePortIfIndex", False),
+    "1.3.6.1.2.1.17.7.1.4.5.1.1": ("dot1qPvid", False),
+    "1.3.6.1.2.1.17.7.1.4.3.1.2": ("dot1qVlanStaticEgressPorts", True),
+    "1.3.6.1.2.1.17.7.1.4.3.1.4": ("dot1qVlanStaticUntaggedPorts", True),
+    # tabulas, ko poll() nelieto, bet kas vajadzīgas seriālnumura labojumam
+    "1.3.6.1.2.1.47.1.1.1.1.11": ("entPhysicalSerialNum", False),
+    "1.3.6.1.2.1.47.1.1.1.1.13": ("entPhysicalModelName", False),
+}
+
+GET_OIDS = {
+    "1.3.6.1.2.1.1.1.0": "sysDescr",
+    "1.3.6.1.2.1.1.3.0": "sysUpTime",
+    "1.3.6.1.2.1.1.5.0": "sysName",
+    "1.3.6.1.2.1.47.1.1.1.1.11.1": "entPhysicalSerialNum.1",
+    "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0": "hpSwitchCpuStat",
+    "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.6.1": "hpLocalMemFreeBytes",
+    "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.7.1": "hpLocalMemAllocBytes",
+}
+
+COUNTERS = ("1.3.6.1.2.1.31.1.1.1.6", "1.3.6.1.2.1.31.1.1.1.10")
+
+
+def numeric(oid):
+    return ".".join(str(p) for p in oid.get_oid())
+
+
+async def walk(engine, auth, target, base, raw):
+    out, prefix = {}, base + "."
+    async for ei, es, _i, vbs in bulk_walk_cmd(
+        engine, auth, target, ContextData(), 0, 25,
+        ObjectType(ObjectIdentity(base)), lexicographicMode=False,
+    ):
+        if ei:
+            raise RuntimeError(f"{base}: {ei}")
+        if es:
+            break
+        stop = False
+        for oid, value in vbs:
+            n = numeric(oid)
+            if not n.startswith(prefix):
+                stop = True
+                break
+            if raw:
+                out[n[len(prefix):]] = base64.b64encode(bytes(value)).decode()
+            else:
+                out[n[len(prefix):]] = value.prettyPrint()
+        if stop:
+            break
+    return out
+
+
+async def main(host, community, out_path, gap=8.0):
+    engine = SnmpEngine()
+    auth = CommunityData(community, mpModel=1)
+    target = await UdpTransportTarget.create((host, 161), timeout=4, retries=2)
+
+    snap = {"host": host, "walks": {}, "walks_raw_b64": [], "get": {}, "counters_t1": {}}
+
+    for base, (label, raw) in WALK_OIDS.items():
+        snap["walks"][base] = await walk(engine, auth, target, base, raw)
+        if raw:
+            snap["walks_raw_b64"].append(base)
+        print(f"  {label:32} {len(snap['walks'][base]):>3} ierakstu")
+
+    ei, es, _i, binds = await get_cmd(
+        engine, auth, target, ContextData(),
+        *[ObjectType(ObjectIdentity(o)) for o in GET_OIDS],
+    )
+    if ei:
+        raise RuntimeError(str(ei))
+    for oid, value in binds:
+        cls = value.__class__.__name__
+        snap["get"][numeric(oid)] = {
+            "value": None if cls in ("NoSuchObject", "NoSuchInstance") else value.prettyPrint(),
+            "type": cls,
+        }
+    print(f"  GET: {len(snap['get'])} OID, "
+          f"{sum(1 for v in snap['get'].values() if v['value'] is None)} tukši")
+
+    print(f"\n  gaidu {gap:.0f}s otrajam skaitītāju mērījumam...")
+    await asyncio.sleep(gap)
+    for base in COUNTERS:
+        snap["counters_t1"][base] = await walk(engine, auth, target, base, False)
+    snap["counter_gap_seconds"] = gap
+
+    # cik portiem skaitītāji tiešām pakustējās -> vai rate testam ir ko rēķināt
+    moved = 0
+    for base in COUNTERS:
+        t0, t1 = snap["walks"][base], snap["counters_t1"][base]
+        moved += sum(1 for k in t0 if k in t1 and int(t1[k]) > int(t0[k]))
+    print(f"  skaitītāji pakustējās {moved} interfeisiem")
+
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        json.dump(snap, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    print(f"\n-> {path} ({path.stat().st_size // 1024} KB)")
+    engine.close_dispatcher()
+
+
+if __name__ == "__main__":
+    asyncio.run(main(sys.argv[1], sys.argv[2], sys.argv[3]))
