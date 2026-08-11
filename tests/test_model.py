@@ -136,8 +136,10 @@ def test_generated_geometry_holds_the_same_invariants_as_a_model(count):
     assert geometry["generated"] is True
 
     for port in ports:
-        assert set(port) == {"id", "label", "kind", "poe", "x", "y", "w", "h"}
+        assert set(port) == {"id", "label", "name", "kind", "poe", "x", "y", "w", "h"}
         assert port["x"] + port["w"] <= geometry["width"]
+        # a label wider than its port is what turned the first attempt into mush
+        assert len(port["label"]) * 4.8 <= port["w"]
         assert port["y"] + port["h"] <= geometry["height"]
 
     boxes = [(p["id"], p["x"], p["y"], p["w"], p["h"]) for p in ports]
@@ -159,3 +161,32 @@ def test_small_devices_get_one_row():
 def test_generated_geometry_keeps_the_poe_flag():
     geometry = model.generated_geometry(_discovered(5), "hAP")
     assert [p["poe"] for p in geometry["ports"]] == [False, False, False, False, True]
+
+
+def test_long_interface_names_are_shortened_but_not_lost():
+    """RouterOS names are whatever an admin typed: "ether1uplink dsl"."""
+    ports = [
+        {"id": "ether1uplink dsl", "label": "ether1uplink dsl"},
+        {"id": "ether2 TV", "label": "ether2 TV"},
+        {"id": "internet", "label": "internet"},
+        {"id": "sfp1", "label": "sfp1"},
+    ]
+    geometry = model.generated_geometry(ports, "router")
+    labels = [p["label"] for p in geometry["ports"]]
+    assert labels == ["ether1", "ether2", "internet", "sfp1"]
+
+    # the full name survives for the tooltip, and only where it differs
+    names = [p["name"] for p in geometry["ports"]]
+    assert names == ["ether1uplink dsl", "ether2 TV", None, None]
+
+    # and the id, which entities key off, is untouched
+    assert [p["id"] for p in geometry["ports"]] == [p["id"] for p in ports]
+
+
+def test_ports_run_left_to_right_in_reported_order():
+    """Column-major is a switch faceplate; a discovered list reads as a list."""
+    ports = [{"id": f"ether{i}", "label": f"ether{i}"} for i in range(1, 12)]
+    laid = model.generated_geometry(ports, "rb")["ports"]
+    top = [p["label"] for p in laid if p["y"] == min(q["y"] for q in laid)]
+    assert top == ["ether1", "ether2", "ether3", "ether4", "ether5", "ether6"]
+    assert [p["x"] for p in laid[:6]] == sorted(p["x"] for p in laid[:6])

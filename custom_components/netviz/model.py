@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -53,40 +54,76 @@ _PORT_W, _PORT_H, _GAP_X, _GAP_Y = 22, 18, 4, 6
 _BLOCK_GAP, _MARGIN_X, _MARGIN_Y, _BLOCK = 14, 26, 26, 12
 
 
+# A port token at the start of an interface name: "ether2 TV" -> "ether2",
+# "ether1uplink dsl" -> "ether1". Anything else gets truncated instead.
+_RE_PORT_TOKEN = re.compile(r"^(sfp[a-z+-]*\d+|[a-z]+\d+)", re.IGNORECASE)
+_LABEL_MAX = 10
+# Roughly the advance width of one character at font-size 8 in viewBox units.
+# The card draws labels at that size, and a label wider than its port turns a
+# faceplate into overlapping mush.
+_CHAR_W = 4.8
+
+
+def short_label(name: str) -> str:
+    """A label that fits on a port.
+
+    Discovered ports are named by whoever configured the device, and on RouterOS
+    that means things like "ether1uplink dsl". Drawn in full at port width they
+    overlap into nonsense, so keep the port token and let the tooltip carry the
+    rest.
+    """
+    text = str(name).strip()
+    if match := _RE_PORT_TOKEN.match(text):
+        return match.group(1)
+    return text[:_LABEL_MAX]
+
+
 def generated_geometry(ports: list[dict], display: str) -> dict:
     """Lay discovered ports out when no model file describes the hardware.
 
-    This is a drawing of a port list, not of a chassis: the ports are in the
-    order the device reported them, two rows for anything longer than six. It
-    cannot know where the SFP cage physically sits or how the front panel is
+    This is a drawing of a port list, not of a chassis: ports run left to right
+    in the order the device reported them, wrapping to a second row past six. It
+    cannot know where an SFP cage physically sits or how a front panel is
     numbered - that is what a model file is for - but it beats no faceplate at
-    all on a device nobody has drawn yet.
-    """
-    rows = 2 if len(ports) > 6 else 1
-    columns = -(-len(ports) // rows)  # ceiling division
-    laid_out = []
-    x = _MARGIN_X
-    column_x = []
-    for column in range(columns):
-        if column and rows == 2 and column % (_BLOCK // 2) == 0:
-            x += _BLOCK_GAP
-        column_x.append(x)
-        x += _PORT_W + _GAP_X
+    all on hardware nobody has drawn yet.
 
+    Port widths follow their labels rather than a fixed 22 units, because a
+    generated faceplate is a list of named ports and the names have to be
+    readable for it to be worth drawing.
+    """
+    if not ports:
+        return {
+            "model": None, "display": display, "width": 0, "height": 0,
+            "viewbox": "0 0 0 0", "generated": True, "ports": [],
+        }
+
+    rows = 2 if len(ports) > 6 else 1
+    per_row = -(-len(ports) // rows)  # ceiling division
+    labels = [short_label(p.get("label", p["id"])) for p in ports]
+    widths = [max(_PORT_W, round(len(label) * _CHAR_W) + 10) for label in labels]
+
+    laid_out = []
+    row_width = [_MARGIN_X] * rows
     for position, port in enumerate(ports):
-        column, row = divmod(position, rows)
+        row = position // per_row
+        x = row_width[row]
+        full = str(port.get("label", port["id"]))
         laid_out.append({
             "id": str(port["id"]),
-            "label": str(port.get("label", port["id"])),
+            "label": labels[position],
+            # the full interface name, for the tooltip - shortening the label is
+            # a drawing decision and must not lose what the operator called it
+            "name": full if full != labels[position] else None,
             "kind": port.get("kind", "rj45"),
             "poe": bool(port.get("poe")),
-            "x": column_x[column],
+            "x": x,
             "y": _MARGIN_Y + row * (_PORT_H + _GAP_Y),
-            "w": _PORT_W,
+            "w": widths[position],
             "h": _PORT_H,
         })
+        row_width[row] = x + widths[position] + _GAP_X
 
-    width = (column_x[-1] if column_x else _MARGIN_X) + _PORT_W + _MARGIN_X
+    width = max(row_width) - _GAP_X + _MARGIN_X
     height = _MARGIN_Y * 2 + _PORT_H * rows + _GAP_Y * (rows - 1)
     return {
         "model": None,

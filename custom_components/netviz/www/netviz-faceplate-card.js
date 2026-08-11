@@ -168,9 +168,13 @@ class NetvizFaceplateCard extends HTMLElement {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", geometry.viewbox || `0 0 ${width} ${height}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    // Scale down to fit, but never blow a small faceplate up to fill the card:
+    // an 11 port device is a quarter the width of a 52 port one, and stretched
+    // to the same width its ports come out four times life size.
+    const maxWidth = Math.round(width * 1.4);
     svg.style.cssText =
-      "width:100%;height:auto;display:block" +
-      (minWidth ? `;min-width:${minWidth}px` : "");
+      "width:100%;height:auto;display:block;margin:0 auto" +
+      (minWidth ? `;min-width:${minWidth}px` : `;max-width:${maxWidth}px`);
     this._viewBoxWidth = width;
     this._labels = [];
 
@@ -356,7 +360,8 @@ class NetvizFaceplateCard extends HTMLElement {
         if (!Number.isNaN(poe)) poeTotal += poe;
       }
 
-      const lines = [`Port ${node.def.label}`];
+      // def.name is the full interface name when the label had to be shortened
+      const lines = [`Port ${node.def.name || node.def.label}`];
       if (link && link.attributes.description) {
         lines.push(link.attributes.description);
       }
@@ -409,4 +414,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.3.0 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.0 ", "background:#2ea3f2;color:#fff", "");
