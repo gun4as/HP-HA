@@ -33,9 +33,13 @@ def _load(name: str):
     return module
 
 
+# profiles first, and registered under the bare name too: snmp.py falls back to
+# `import profiles` when it is not inside a package, and loading it twice would
+# give the tests a different Profile object than the client holds.
+profiles = _load("profiles")
+sys.modules["profiles"] = profiles
 snmp = _load("snmp")
 model = _load("model")
-profiles = _load("profiles")
 
 
 class Snapshot:

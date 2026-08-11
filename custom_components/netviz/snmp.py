@@ -34,6 +34,11 @@ from pysnmp.hlapi.v3arch.asyncio import (
     usmHMACSHAAuthProtocol,
 )
 
+try:  # inside Home Assistant this is a package
+    from . import profiles
+except ImportError:  # ...and standalone it is a plain directory on sys.path
+    import profiles
+
 _LOGGER = logging.getLogger(__name__)
 
 AUTH_PROTOCOLS = {
@@ -74,8 +79,11 @@ OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"
 OID_VLAN_EGRESS = "1.3.6.1.2.1.17.7.1.4.3.1.2"
 OID_VLAN_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"
 
+OID_IF_TYPE = "1.3.6.1.2.1.2.2.1.3"
+
 # --- system ---
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
+OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
 OID_SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
 OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
 # ENTITY-MIB entPhysicalSerialNum. The table, not `.1`: on AOS-S the chassis is
@@ -193,7 +201,9 @@ def _portlist(raw: bytes) -> set[int]:
 class SnmpClient:
     """One agent. Lives as long as the config entry."""
 
-    def __init__(self, creds: SnmpCredentials) -> None:
+    def __init__(
+        self, creds: SnmpCredentials, profile: profiles.Profile | None = None
+    ) -> None:
         self._creds = creds
         self._engine = SnmpEngine()
         self._auth = _auth_data(creds)
@@ -202,6 +212,9 @@ class SnmpClient:
         self._prev: _Snapshot | None = None
         self._vlan_cache: tuple[float, dict[int, dict]] | None = None
         self._unmatched: frozenset[str] | None = None
+        # Until sysObjectID has been read, assume nothing beyond standard MIBs.
+        self.profile = profile or profiles.GENERIC
+        self._detected = profile is not None
 
     async def _target(self) -> UdpTransportTarget:
         if self._transport is None:
@@ -280,15 +293,56 @@ class SnmpClient:
 
     # ------------------------------------------------------------ higher level
 
-    async def _serial(self) -> str | None:
-        """Chassis serial number from ENTITY-MIB.
+    def _adopt(self, sys_object_id: object) -> None:
+        self.profile = profiles.detect(sys_object_id)
+        self._detected = True
+        _LOGGER.debug(
+            "%s: sysObjectID %s -> profile %s",
+            self._creds.host,
+            sys_object_id,
+            self.profile.key,
+        )
 
-        Asks the device which row is the chassis rather than guessing. Where
-        entPhysicalClass is missing, falls back to ascending index order, since
-        the chassis precedes the modules plugged into it. Empty values, vendor
-        placeholders and the stray whitespace module serials carry are all
-        dropped; if nothing usable is left the answer is None, which is honest.
+    async def _ensure_profile(self) -> None:
+        """Detect on first use.
+
+        The coordinator calls poll() straight after a restart without any probe,
+        so waiting for probe() would leave every device on the generic profile -
+        no PoE, no CPU - until something happened to call it.
         """
+        if self._detected:
+            return
+        try:
+            data = await self.get_many([OID_SYS_OBJECT_ID])
+        except SnmpConnectionError:
+            return
+        self._adopt(data.get(OID_SYS_OBJECT_ID))
+
+    def _usable_serial(self, value: object) -> str | None:
+        text = str(value or "").strip()
+        if not text or text.lower() in self.profile.serial.placeholders:
+            return None
+        return text
+
+    async def _serial(self) -> str | None:
+        """A stable per-device identifier, from wherever the profile says.
+
+        Either the ENTITY-MIB row the device itself calls a chassis, or a vendor
+        scalar. If nothing usable comes back the answer is None, which is honest
+        - better than a string like `rb400_usb` that is identical on every unit
+        of a model and would collide two devices onto one unique_id.
+        """
+        source = self.profile.serial
+        if source.scalar_oid:
+            try:
+                data = await self.get_many([source.scalar_oid])
+            except SnmpConnectionError:
+                _LOGGER.debug("%s is not available", source.scalar_oid, exc_info=True)
+                return None
+            return self._usable_serial(data.get(source.scalar_oid))
+
+        if not source.entity_chassis:
+            return None
         try:
             serials = await self.walk(OID_ENT_SERIAL_TABLE)
         except SnmpConnectionError:
@@ -307,26 +361,74 @@ class SnmpClient:
                 if _as_int(value) == ENT_CLASS_CHASSIS
             ]
         else:
+            # No class column at all: fall back to index order, where the
+            # chassis precedes the modules plugged into it.
             candidates = list(serials)
 
         for index in sorted(candidates, key=lambda k: [int(p) for p in k.split(".")]):
-            value = str(serials.get(index, "")).strip()
-            if value and value.lower() not in SERIAL_PLACEHOLDERS:
-                return value
+            if usable := self._usable_serial(serials.get(index)):
+                return usable
         return None
 
     async def probe(self) -> dict[str, str | None]:
-        """For config flow validation. Raises SnmpConnectionError on silence."""
+        """For config flow validation. Raises SnmpConnectionError on silence.
+
+        Also settles which profile applies, so everything after this point knows
+        which private MIBs the device actually speaks.
+        """
         async with self._lock:
-            data = await self.get_many([OID_SYS_NAME, OID_SYS_DESCR])
+            data = await self.get_many(
+                [OID_SYS_NAME, OID_SYS_DESCR, OID_SYS_OBJECT_ID]
+            )
             if not data:
                 raise SnmpConnectionError("the agent did not respond")
+            self._adopt(data.get(OID_SYS_OBJECT_ID))
             serial = await self._serial()
         return {
             "name": str(data.get(OID_SYS_NAME, "")).strip() or None,
             "descr": str(data.get(OID_SYS_DESCR, "")).strip() or None,
             "serial": serial,
+            "profile": self.profile.key,
+            "profile_name": self.profile.name,
         }
+
+    async def discover_ports(self) -> list[dict]:
+        """Physical ports straight off the device, when no model file applies.
+
+        ifType 6 is ethernetCsmacd on every vendor, which is the only reliable
+        way to tell a port from a VLAN interface, a bridge or a radio. ifName is
+        not: on RouterOS it is whatever the administrator typed, so it serves as
+        the label and as the key, and renaming an interface does create new
+        entities - the same trade-off the model files already make.
+        """
+        types = await self.walk(OID_IF_TYPE)
+        names = await self.walk(OID_IF_NAME)
+        poe_ports: set[str] = set()
+        if (poe := self.profile.poe) and poe.index == "ifindex":
+            poe_ports = {k.split(".")[0] for k in await self.walk(poe.power_oid)}
+
+        ports: list[dict] = []
+        for index in sorted(
+            (i for i, t in types.items() if _as_int(t) == profiles.IF_TYPE_ETHERNET),
+            key=lambda k: int(k),
+        ):
+            name = str(names.get(index, "")).strip() or f"if{index}"
+            ports.append({
+                "id": name,
+                "label": name,
+                "kind": "rj45",
+                "ifname": name,
+                "ifindex": int(index),
+                "poe": index in poe_ports,
+                "poe_index": index,
+            })
+        _LOGGER.debug(
+            "%s: discovered %d physical ports, %d with PoE",
+            self._creds.host,
+            len(ports),
+            sum(1 for p in ports if p["poe"]),
+        )
+        return ports
 
     async def _vlans(self, ttl: float = 300.0) -> dict[int, dict]:
         loop = asyncio.get_running_loop()
@@ -340,8 +442,13 @@ class SnmpClient:
             for bp, v in base_map_raw.items()
             if _as_int(bp) is not None and _as_int(v) is not None
         }
-        egress = await self.walk(OID_VLAN_EGRESS, raw_bytes=True)
-        untagged = await self.walk(OID_VLAN_UNTAGGED, raw_bytes=True)
+        # RouterOS leaves the static VLAN tables empty while filling dot1qPvid,
+        # so on such a profile there is no point asking for them at all.
+        if self.profile.vlan_egress:
+            egress = await self.walk(OID_VLAN_EGRESS, raw_bytes=True)
+            untagged = await self.walk(OID_VLAN_UNTAGGED, raw_bytes=True)
+        else:
+            egress, untagged = {}, {}
         pvid = await self.walk(OID_DOT1Q_PVID)
 
         result: dict[int, dict] = {}
@@ -372,9 +479,31 @@ class SnmpClient:
         self._vlan_cache = (now, result)
         return result
 
+    async def _storage(self, match: str) -> tuple[int | None, int | None]:
+        """Free and used bytes from an hrStorage row, matched by description.
+
+        Sizes are in allocation units, not bytes, and the unit is per row.
+        """
+        descrs = await self.walk(profiles.OID_HR_STORAGE_DESCR)
+        index = next(
+            (i for i, v in descrs.items() if str(v).strip().lower() == match), None
+        )
+        if index is None:
+            return None, None
+        sizes = await self.walk(profiles.OID_HR_STORAGE_SIZE)
+        used = await self.walk(profiles.OID_HR_STORAGE_USED)
+        units = await self.walk(profiles.OID_HR_STORAGE_UNITS)
+        unit = _as_int(units.get(index), 1) or 1
+        total = _as_int(sizes.get(index))
+        taken = _as_int(used.get(index))
+        if total is None or taken is None:
+            return None, None
+        return (total - taken) * unit, taken * unit
+
     async def poll(self, ports: list[dict], with_vlans: bool = True) -> dict:
-        """One full cycle. `ports` comes from the model JSON."""
+        """One full cycle. `ports` comes from the model JSON, or from discovery."""
         async with self._lock:
+            await self._ensure_profile()
             loop = asyncio.get_running_loop()
             names = await self.walk(OID_IF_NAME)
             if not any(str(v) for v in names.values()):
@@ -391,22 +520,47 @@ class SnmpClient:
             alias = await self.walk(OID_IF_ALIAS)
             hcin = await self.walk(OID_IF_HCIN)
             hcout = await self.walk(OID_IF_HCOUT)
-            detect = await self.walk(OID_PETH_DETECT)
-            poe_mw = await self.walk(OID_HP_POE_MW)
+            poe = self.profile.poe
+            poe_power = await self.walk(poe.power_oid) if poe else {}
+            poe_status = (
+                await self.walk(poe.status_oid) if poe and poe.status_oid else {}
+            )
             vlan_map = await self._vlans() if with_vlans else {}
 
-            system_raw = await self.get_many(
-                [
-                    OID_SYS_NAME,
-                    OID_SYS_DESCR,
-                    OID_SYS_UPTIME,
-                    OID_CPU,
-                    OID_MEM_FREE,
-                    OID_MEM_USED,
+            scalars = [OID_SYS_NAME, OID_SYS_DESCR, OID_SYS_UPTIME]
+            cpu_source = self.profile.cpu
+            if cpu_source and not cpu_source.table:
+                scalars.append(cpu_source.oid)
+            memory = self.profile.memory
+            if memory and memory.free_oid:
+                scalars += [memory.free_oid, memory.used_oid]
+            system_raw = await self.get_many(scalars)
+
+            cpu = _as_int(system_raw.get(cpu_source.oid)) if (
+                cpu_source and not cpu_source.table
+            ) else None
+            if cpu_source and cpu_source.table:
+                # RouterOS reports one row per core; a single number is what a
+                # sensor can show, so average them.
+                loads = [
+                    v for v in (_as_int(x) for x in (await self.walk(cpu_source.oid)).values())
+                    if v is not None
                 ]
-            )
-            main_power = await self.walk(OID_PETH_MAIN_POWER)
-            main_cons = await self.walk(OID_PETH_MAIN_CONS)
+                cpu = round(sum(loads) / len(loads)) if loads else None
+
+            mem_free = mem_used = None
+            if memory and memory.free_oid:
+                mem_free = _as_int(system_raw.get(memory.free_oid))
+                mem_used = _as_int(system_raw.get(memory.used_oid))
+            elif memory and memory.storage_match:
+                mem_free, mem_used = await self._storage(memory.storage_match)
+
+            main_power = await self.walk(poe.main_power_oid) if (
+                poe and poe.main_power_oid
+            ) else {}
+            main_cons = await self.walk(poe.main_consumption_oid) if (
+                poe and poe.main_consumption_oid
+            ) else {}
 
             now = loop.time()
             snap = _Snapshot(ts=now)
@@ -453,13 +607,20 @@ class SnmpClient:
                     "tx_bps": tx_bps,
                 }
 
-                if pdef.get("poe"):
-                    pidx = str(pdef.get("poe_index", f"1.{pid}"))
-                    status = _as_int(detect.get(pidx))
-                    milliwatts = _as_int(poe_mw.get(pidx))
-                    port["poe_status"] = DETECT_STATUS.get(status, "unknown")
+                if poe and pdef.get("poe"):
+                    # AOS-S addresses the PoE tables by <group>.<port>, which the
+                    # model file carries; RouterOS addresses them by ifIndex.
+                    pidx = (
+                        str(ifindex) if poe.index == "ifindex"
+                        else str(pdef.get("poe_index", f"1.{pid}"))
+                    )
+                    raw_power = _as_int(poe_power.get(pidx))
+                    port["poe_status"] = poe.status_map.get(
+                        _as_int(poe_status.get(pidx)), "unknown"
+                    )
                     port["poe_power"] = (
-                        round(milliwatts / 1000, 1) if milliwatts is not None else None
+                        round(raw_power / poe.power_divisor, 1)
+                        if raw_power is not None else None
                     )
 
                 vinfo = vlan_map.get(ifindex)
@@ -507,9 +668,10 @@ class SnmpClient:
                 "name": str(system_raw.get(OID_SYS_NAME, "")) or None,
                 "descr": str(system_raw.get(OID_SYS_DESCR, "")) or None,
                 "uptime": uptime // 100 if uptime is not None else None,
-                "cpu": _as_int(system_raw.get(OID_CPU)),
-                "mem_free": _as_int(system_raw.get(OID_MEM_FREE)),
-                "mem_used": _as_int(system_raw.get(OID_MEM_USED)),
+                "profile": self.profile.key,
+                "cpu": cpu,
+                "mem_free": mem_free,
+                "mem_used": mem_used,
                 "poe_budget": _as_int(next(iter(main_power.values()), None)),
                 "poe_used": _as_int(next(iter(main_cons.values()), None)),
                 "ports_up": sum(1 for p in out_ports.values() if p["link"]),

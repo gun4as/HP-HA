@@ -236,3 +236,104 @@ def _aruba_ports() -> list[dict]:
     from conftest import model
 
     return [dict(p) for p in model.load_model("jl357a")["ports"]]
+
+
+# ------------------------------------------------------ profile-driven polling
+
+
+async def test_profile_is_detected_on_the_first_poll(aruba, rb2011):
+    """The coordinator polls straight after a restart, without probing first.
+
+    If detection only happened in probe(), every device would sit on the generic
+    profile - no PoE, no CPU - until something happened to call it.
+    """
+    for snapshot, expected in ((aruba, "aos_s"), (rb2011, "routeros")):
+        client = FixtureClient(snapshot)
+        assert client.profile.key == "generic"
+        data = await client.poll(snapshot.physical_ports())
+        assert client.profile.key == expected
+        assert data["system"]["profile"] == expected
+
+
+async def test_routeros_cpu_is_averaged_over_the_cores(capsman):
+    """hrProcessorLoad is one row per core; a sensor shows one number."""
+    from conftest import profiles
+
+    loads = [int(v) for v in capsman.walk(profiles.OID_HR_CPU).values()]
+    assert len(loads) > 1, "fixture should have a multi-core device"
+
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    assert data["system"]["cpu"] == round(sum(loads) / len(loads))
+
+
+async def test_routeros_memory_comes_from_hrstorage(rb2011):
+    """Two vendor scalars on AOS-S, one hrStorage row in allocation units here."""
+    from conftest import profiles
+
+    descrs = rb2011.walk(profiles.OID_HR_STORAGE_DESCR)
+    index = next(i for i, v in descrs.items() if v == "main memory")
+    unit = int(rb2011.walk(profiles.OID_HR_STORAGE_UNITS)[index])
+    size = int(rb2011.walk(profiles.OID_HR_STORAGE_SIZE)[index])
+    used = int(rb2011.walk(profiles.OID_HR_STORAGE_USED)[index])
+
+    system = (await FixtureClient(rb2011).poll(rb2011.physical_ports()))["system"]
+    assert system["mem_used"] == used * unit
+    assert system["mem_free"] == (size - used) * unit
+    assert unit > 1, "allocation units matter; a fixture with unit 1 proves nothing"
+
+
+async def test_ports_are_discovered_without_a_model_file(rb2011, capsman):
+    """ifType 6 is ethernetCsmacd everywhere; ifName is whatever an admin typed."""
+    for snapshot, expected in ((rb2011, 11), (capsman, 5)):
+        client = FixtureClient(snapshot)
+        await client._ensure_profile()
+        ports = await client.discover_ports()
+        assert len(ports) == expected
+        # radios, bridges and VLAN interfaces must not be mistaken for ports
+        names = {p["id"] for p in ports}
+        assert not any(n.startswith(("wlan", "bridge", "vlan", "lo")) for n in names)
+
+
+async def test_discovery_marks_poe_ports_by_ifindex(rb2011):
+    """RouterOS addresses its PoE table by ifIndex, not by port number."""
+    from conftest import profiles
+
+    poe_table = rb2011.walk(profiles.ROUTEROS.poe.power_oid)
+    assert len(poe_table) == 1, "an RB2011 has exactly one PoE-out port"
+
+    client = FixtureClient(rb2011)
+    await client._ensure_profile()
+    ports = await client.discover_ports()
+    with_poe = [p for p in ports if p["poe"]]
+    assert len(with_poe) == 1
+    assert str(with_poe[0]["ifindex"]) in poe_table
+
+
+async def test_polling_discovered_routeros_ports(rb2011):
+    client = FixtureClient(rb2011)
+    await client._ensure_profile()
+    data = await client.poll(await client.discover_ports())
+
+    assert len(data["ports"]) == 11
+    assert data["system"]["ports_up"] > 0
+    # PoE exists as a concept on this device, so the one PoE port reports a status
+    poe_ports = [p for p in data["ports"].values() if "poe_status" in p]
+    assert len(poe_ports) == 1
+    # ...but the HP-only system counters must not be invented
+    assert data["system"]["poe_budget"] is None
+
+
+async def test_generic_profile_reads_no_private_oids(aruba):
+    """An unrecognised vendor gets standard MIBs and honest gaps."""
+    from conftest import profiles
+
+    client = FixtureClient(aruba)
+    client.profile = profiles.GENERIC
+    client._detected = True
+
+    data = await client.poll(_aruba_ports())
+    assert len(data["ports"]) == 52          # IF-MIB still works
+    assert data["system"]["cpu"] is None
+    assert data["system"]["poe_budget"] is None
+    assert all("poe_power" not in p for p in data["ports"].values())
+    assert not any("14988" in oid or "2.14.11" in oid for oid in client.walked)
