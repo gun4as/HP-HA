@@ -1,11 +1,10 @@
 # netviz
 
-Managed network switch visualisation for Home Assistant. The SNMP polling happens
+Managed network device visualisation for Home Assistant. The SNMP polling happens
 inside HA itself — no MQTT, no separate container, no add-on.
 
-First model: **Aruba 2540-48G-PoE+-4SFP+ (JL357A)**, ArubaOS-Switch 16.x.
-
-Read-only. No SNMP SET anywhere — a read-only community or v3 user is enough.
+Read-only. No SNMP SET anywhere — a read-only community or an SNMPv3 user is
+enough.
 
 *Latviski: [README.lv.md](README.lv.md)*
 
@@ -16,8 +15,48 @@ Read-only. No SNMP SET anywhere — a read-only community or v3 user is enough.
   PoE status, PVID, description
 - System sensors: CPU, uptime, PoE consumption and budget, ports up
 - A faceplate Lovelace card that the integration registers by itself
-- The model definition lives in a JSON file — a new switch model is not a code
-  change
+- Ports are discovered from the device, so nothing has to be described in
+  advance; a model file is optional and adds faceplate geometry
+
+## Which devices
+
+Ports, link state, speed, throughput and descriptions come from standard MIBs and
+work on anything that answers SNMP. Everything beyond that is vendor-specific, so
+netviz picks a **profile** from `sysObjectID` and only reads what that vendor
+actually implements.
+
+| | ArubaOS-Switch | MikroTik RouterOS | anything else |
+|---|---|---|---|
+| Ports, link, speed, RX/TX | yes | yes | yes |
+| Port descriptions | `ifAlias` | `ifName` | both |
+| PVID per port | yes | yes | yes |
+| VLAN membership, access vs trunk | yes | no | if Q-BRIDGE is filled |
+| PoE per port | yes, milliwatts | yes, units unverified | no |
+| PoE budget and consumption | yes | no | no |
+| CPU | yes | yes, averaged over cores | no |
+| Serial number as unique_id | ENTITY-MIB chassis row | `mtxrSerialNumber` | ENTITY-MIB if present |
+
+An unrecognised vendor gets the last column and no guesses. Reading a private OID
+that belongs to somebody else and reporting the resulting zero as a measurement is
+worse than reporting nothing.
+
+Tested against an Aruba 2540-48G-PoE+-4SFP+ (JL357A) on ArubaOS-Switch 16.11, and
+against RouterOS 7.20–7.21 on a hAP ac³, two cAP ac and an RB2011UiAS.
+
+### Known gaps on RouterOS
+
+- **PoE power units are unverified.** Every MikroTik available for testing had one
+  PoE-out port with nothing plugged into it, so voltage, current and power all
+  read zero and the divisor could not be confirmed. It is marked as an assumption
+  in `profiles.py`. If your reading looks wrong by a factor of ten, that is why.
+- **VLAN membership is unavailable.** RouterOS fills `dot1qPvid` but leaves
+  `dot1qVlanStaticEgressPorts` empty, so netviz reports the PVID and says nothing
+  about access versus trunk rather than guessing. This was confirmed on a router
+  and three access points; a CRS switch with bridge VLAN filtering may well
+  populate the table, and the profile would then be wrong to assume otherwise.
+- **Wireless is not exposed yet.** On a CAPsMAN controller the client
+  registrations are readable and the fixtures cover them, but no entities are
+  built from them.
 
 ## Installing through HACS
 
@@ -25,6 +64,9 @@ Read-only. No SNMP SET anywhere — a read-only community or v3 user is enough.
 2. URL: `https://github.com/gun4as/HP-HA`, category **Integration**
 3. Install **netviz**, restart Home Assistant
 4. **Settings → Devices & services → Add integration → netviz**
+
+Leave the model on **Detect ports automatically** unless a model file exists for
+your exact hardware.
 
 You do **not** need to add the card to the Lovelace resources by hand — the
 integration registers it through `add_extra_js_url`. If after a restart the card
@@ -38,7 +80,9 @@ this order:
    only shows up after a full reload.
 3. If the file opens but the card is still missing, add the resource by hand:
    **Settings → Dashboards → three dots → Resources → Add**, URL
-   `/netviz/netviz-faceplate-card.js`, type **JavaScript Module**.
+   `/netviz/netviz-faceplate-card.js`, type **JavaScript Module**. Note that a
+   manual resource has no cache-busting query string, so it will keep serving the
+   old file after an update — remove it once the automatic registration works.
 
 ### Icon
 
@@ -67,13 +111,13 @@ nothing extra and cannot create a version conflict.
 
 ## Configuration
 
-Read-only access is enough on the switch side. AOS-S:
+Read-only access is enough. ArubaOS-Switch:
 
 ```
 snmp-server community "netviz" operator restricted
 ```
 
-SNMPv3 (recommended):
+SNMPv3 on AOS-S (recommended):
 
 ```
 snmpv3 enable
@@ -81,9 +125,24 @@ snmpv3 user netviz auth sha <authpass> priv aes <privpass>
 snmpv3 group managerpriv user netviz sec-model ver3
 ```
 
+RouterOS ships with SNMP disabled. A community restricted to the Home Assistant
+host:
+
+```
+/snmp community add name=netviz addresses=<ha-ip>/32 read-access=yes write-access=no
+/snmp set enabled=yes
+```
+
+If it still does not answer, check the input chain — a default firewall will drop
+UDP 161 before it reaches the service:
+
+```
+/ip firewall filter print where chain=input
+```
+
 The options (integration card → **Configure**) let you change the poll interval,
 turn individual metrics on and off, read or skip VLAN information, and pick
-whether the device page links to the switch over http or https.
+whether the device page links to the device over http or https.
 
 ## Entity count — read this before enabling everything
 
@@ -94,7 +153,8 @@ On a JL357A:
 | Default (link, speed, RX, TX, PoE power, PoE status) | **310** |
 | Everything (`ALL_METRICS`) | **518** |
 
-Every metric multiplies by 52 ports. If the recorder starts to struggle, drop
+Every metric multiplies by the port count, so a five-port router is nothing to
+worry about and a 48-port switch is. If the recorder starts to struggle, drop
 `rx_rate` and `tx_rate` from the options and keep them only where the history is
 genuinely useful, or exclude the port sensors in the recorder config:
 
@@ -121,9 +181,9 @@ type: custom:netviz-faceplate-card
 faceplate: sensor.sw_2540_faceplate
 ```
 
-A faceplate is long and low — on a JL357A the aspect ratio is close to 9:1. The
-card needs width, otherwise the ports end up tiny. In a sections dashboard, give
-it a full row:
+A switch faceplate is long and low — on a JL357A the aspect ratio is close to 9:1.
+The card needs width, otherwise the ports end up tiny. In a sections dashboard,
+give it a full row:
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -132,10 +192,12 @@ grid_options:
   columns: full
 ```
 
-The card scales to its container and has no scrollbar. Port numbers are hidden
-when they would render below about 5.5px — under roughly 615px of card width on a
-52 port chassis. The colours and the tooltip stay. If you would rather have full
-size with horizontal scrolling, set `min_width`:
+The card scales to its container and has no scrollbar. It will not magnify a
+small faceplate past 1.4× its natural size, so a five-port router does not fill a
+dashboard. Port labels are hidden when they would render below about 5.5px — under
+roughly 615px of card width on a 52 port chassis — and the colours and the tooltip
+stay. If you would rather have full size with horizontal scrolling, set
+`min_width`:
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -149,10 +211,25 @@ state from the other entities of the same device. It collects ports by their
 
 Colours: green 1G, blue 10G, amber 10/100M, grey down. An orange dot means the
 port is delivering PoE; it sits in the corner at normal size and moves to the
-middle of the port once the numbers are hidden. Clicking a port opens its
+middle of the port once the labels are hidden. Clicking a port opens its
 more-info dialog.
 
-## A new switch model
+### Without a model file
+
+Discovered ports are laid out automatically: left to right in the order the
+device reported them, wrapping to a second row past six, each port sized to fit
+its label. Interface names are shortened to their port token, because on RouterOS
+a name like `ether1uplink dsl` is three times the width of the port it labels and
+adjacent labels overlap into nonsense; the full name stays in the tooltip.
+
+That drawing is a **port list, not a chassis**. It cannot know where an SFP cage
+physically sits or how a front panel is numbered, and it marks itself `generated`
+in the geometry. A model file is what turns it into a picture of real hardware.
+
+## Model files
+
+A model file is optional. It contributes faceplate geometry and nothing else —
+the ports themselves always come from the device.
 
 ```bash
 python3 tools/gen_model.py --rj45 48 --sfp 4 --numbering column --sfp-side left \
@@ -189,61 +266,89 @@ pip install -r requirements_test.txt
 pytest
 ```
 
-Nothing else is needed — no Home Assistant install, no network. `snmp.py` and
-`model.py` import no HA, and the tests load them straight from their files, so a
-real `SnmpClient` runs with only `walk()` and `get_many()` fed from a recorded
-snapshot. Everything above those two methods is the production code path.
+Nothing else is needed — no Home Assistant install, no network. `snmp.py`,
+`model.py` and `profiles.py` import no HA, and the tests load them straight from
+their files, so a real `SnmpClient` runs with only `walk()` and `get_many()` fed
+from a recorded snapshot. Everything above those two methods is the production
+code path.
 
-The snapshots come from a JL357A and a MikroTik RB2011, and the two devices
-disagree in useful ways: the RB2011 leaves the Q-BRIDGE egress table empty while
-filling `dot1qPvid`, and answers `entPhysicalSerialNum` with `rb400_usb` from a
-row whose `entPhysicalClass` is `unknown`. Both cases are pinned by tests,
-because both produced a wrong answer that looked like a right one.
+Three snapshots, from a JL357A, a MikroTik RB2011 and a CAPsMAN controller. They
+disagree in useful ways, and every disagreement below produced a wrong answer
+that looked like a right one until a test pinned it:
 
-The tests never touch hardware — they run against a snapshot taken from a real
-switch and then scrubbed. Two steps, and the second one is mandatory:
+- the RB2011 leaves the Q-BRIDGE egress table empty while filling `dot1qPvid`,
+  which made every port come out as `access`, trunks included
+- it answers `entPhysicalSerialNum` with `rb400_usb` from a row whose
+  `entPhysicalClass` is `unknown` — a string identical on every RB2011, which
+  would have collided two devices onto one unique_id
+- `hrProcessorLoad` returns one value on one device and four on another, on the
+  same firmware version
+- `sysObjectID` arrives as `SNMPv2-SMI::enterprises.11...` rather than the dotted
+  form, because pysnmp renders OIDs through its MIBs
+
+The tests never touch hardware — they run against snapshots taken from real
+devices and then scrubbed. Two steps, and the second one is mandatory:
 
 ```bash
 python3 tools/capture_fixture.py 192.0.2.10 public tests/fixtures/mine-live.json
 python3 tools/sanitize_fixture.py tests/fixtures/mine-live.json tests/fixtures/mine.json
 ```
 
-A raw snapshot contains the hostname, the chassis and SFP module serial numbers,
-port descriptions naming actual devices, and VLAN names. `sanitize_fixture.py`
-replaces all of it, leaves every numeric value untouched, and finishes with an
-audit that fails if a private IP or MAC address survived. `*-live.json` is in
-`.gitignore`, so the raw version cannot be committed by accident.
-
-The bundled `tests/fixtures/jl357a.json` is exactly such a scrubbed snapshot from
-a JL357A with 52 ports, 22 links up, six PoE consumers and eight VLANs.
+A raw snapshot contains the hostname, chassis and module serial numbers, port
+descriptions naming actual devices, VLAN names, SSIDs and the MAC address of
+every wireless client. `sanitize_fixture.py` replaces all of it, leaves every
+numeric value untouched, and finishes with an audit that fails if a private IP or
+MAC address survived. `*-live.json` is in `.gitignore`, so the raw version cannot
+be committed by accident.
 
 ## OIDs used
+
+Standard MIBs, read on every device:
 
 | What | OID | MIB |
 |---|---|---|
 | ifName / ifAlias | `1.3.6.1.2.1.31.1.1.1.1` / `.18` | IF-MIB |
+| ifType — how physical ports are found | `1.3.6.1.2.1.2.2.1.3` | IF-MIB |
 | ifOperStatus / ifAdminStatus | `1.3.6.1.2.1.2.2.1.8` / `.7` | IF-MIB |
 | ifHighSpeed | `1.3.6.1.2.1.31.1.1.1.15` | IF-MIB |
 | ifHCInOctets / ifHCOutOctets | `1.3.6.1.2.1.31.1.1.1.6` / `.10` | IF-MIB |
+| sysObjectID — how the profile is chosen | `1.3.6.1.2.1.1.2.0` | SNMPv2-MIB |
+| entPhysicalClass / SerialNum | `1.3.6.1.2.1.47.1.1.1.1.5` / `.11` | ENTITY-MIB |
+| dot1dBasePortIfIndex | `1.3.6.1.2.1.17.1.4.1.2` | BRIDGE-MIB |
+| dot1qPvid | `1.3.6.1.2.1.17.7.1.4.5.1.1` | Q-BRIDGE-MIB |
+| dot1qVlanStaticEgress / Untagged | `1.3.6.1.2.1.17.7.1.4.3.1.2` / `.4` | Q-BRIDGE-MIB |
+
+ArubaOS-Switch:
+
+| What | OID | MIB |
+|---|---|---|
 | pethPsePortDetectionStatus | `1.3.6.1.2.1.105.1.1.1.6` | POWER-ETHERNET-MIB |
 | pethMainPsePower / Consumption | `1.3.6.1.2.1.105.1.3.1.1.2` / `.4` | POWER-ETHERNET-MIB |
 | hpicfPoePethPsePortActualPower | `1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8` | HP-ICF-POE-MIB (**mW**) |
 | hpSwitchCpuStat | `1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0` | STATISTICS-MIB |
-| entPhysicalSerialNum | `1.3.6.1.2.1.47.1.1.1.1.11` | ENTITY-MIB |
-| dot1dBasePortIfIndex | `1.3.6.1.2.1.17.1.4.1.2` | BRIDGE-MIB |
-| dot1qPvid | `1.3.6.1.2.1.17.7.1.4.5.1.1` | Q-BRIDGE-MIB |
-| dot1qVlanStaticEgress / Untagged | `1.3.6.1.2.1.17.7.1.4.3.1.2` / `.4` | Q-BRIDGE-MIB |
+| hpLocalMemFree / AllocBytes | `...5.1.1.2.1.1.1.6.1` / `.7.1` | NETSWITCH-MIB |
+
+MikroTik RouterOS:
+
+| What | OID | MIB |
+|---|---|---|
+| mtxrSerialNumber | `1.3.6.1.4.1.14988.1.1.7.3.0` | MIKROTIK-MIB |
+| mtxrPOEStatus / Power | `1.3.6.1.4.1.14988.1.1.15.1.1.3` / `.6` | MIKROTIK-MIB |
+| hrProcessorLoad | `1.3.6.1.2.1.25.3.3.1.2` | HOST-RESOURCES-MIB |
+| hrStorage — memory | `1.3.6.1.2.1.25.2.3.1.3` … `.6` | HOST-RESOURCES-MIB |
+| CAPsMAN registrations *(not yet used)* | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
 
 HP-ICF-POE-MIB: <https://mibs.observium.org/mib/HP-ICF-POE-MIB/>
 AOS-S 16.11: <https://arubanetworking.hpe.com/techdocs/AOS-S/16.11/MCG/YAYB/content/common%20files/vie-poe-sta-spe-por.htm>
 
 ## Not there yet
 
+- Wireless entities from a CAPsMAN controller — clients per SSID and per access
+  point, signal statistics. The data is readable and the fixture covers it.
+- Memory sensors, although memory is already polled on both vendors
 - LLDP neighbours (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
 - MAC table per port (`dot1dTpFdbPort`)
 - A visual editor for the card (YAML only for now)
-- Memory sensors, although `hpLocalMemFreeBytes` and `hpLocalMemAllocBytes` are
-  already polled
 - An overall timeout around one poll cycle
 
 ## Licence

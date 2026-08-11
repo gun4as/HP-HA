@@ -1,11 +1,9 @@
 # netviz
 
-Pārvaldāmu tīkla switch'u vizualizācija Home Assistant. SNMP aptauja notiek
-pašā HA — nav ne MQTT, ne atsevišķa konteinera, ne add-on'a.
+Pārvaldāmu tīkla iekārtu vizualizācija Home Assistant. SNMP aptauja notiek pašā
+HA — nav ne MQTT, ne atsevišķa konteinera, ne add-on'a.
 
-Pirmais modelis: **Aruba 2540-48G-PoE+-4SFP+ (JL357A)**, ArubaOS-Switch 16.x.
-
-Tikai lasīšana. Nekādu SNMP SET — read-only community vai v3 lietotājs pietiek.
+Tikai lasīšana. Nekādu SNMP SET — read-only community vai SNMPv3 lietotājs pietiek.
 
 *In English: [README.md](README.md)*
 
@@ -16,7 +14,48 @@ Tikai lasīšana. Nekādu SNMP SET — read-only community vai v3 lietotājs pie
   PoE statuss, PVID, apraksts
 - Sistēmas sensori: CPU, uptime, PoE patēriņš un budžets, aktīvo portu skaits
 - Faceplate Lovelace karte, ko integrācija reģistrē pati
-- Modeļa definīcija JSON failā — jauns switch modelis nav koda izmaiņa
+- Porti tiek atrasti uz pašas iekārtas, tāpēc neko nevajag aprakstīt iepriekš;
+  modeļa fails ir neobligāts un pievieno tikai priekšpaneļa ģeometriju
+
+## Kādas iekārtas
+
+Porti, link, ātrums, caurlaidība un apraksti nāk no standarta MIB un strādā uz
+visa, kas atbild SNMP. Viss pārējais ir ražotāja specifisks, tāpēc netviz izvēlas
+**profilu** pēc `sysObjectID` un lasa tikai to, ko konkrētais ražotājs tiešām
+atbalsta.
+
+| | ArubaOS-Switch | MikroTik RouterOS | pārējie |
+|---|---|---|---|
+| Porti, link, ātrums, RX/TX | jā | jā | jā |
+| Portu apraksti | `ifAlias` | `ifName` | abi |
+| PVID uz portu | jā | jā | jā |
+| VLAN dalība, access vai trunk | jā | nē | ja Q-BRIDGE ir aizpildīts |
+| PoE uz portu | jā, milivatos | jā, mērvienības nepārbaudītas | nē |
+| PoE budžets un patēriņš | jā | nē | nē |
+| CPU | jā | jā, vidējots pa kodoliem | nē |
+| Seriālnumurs kā unique_id | ENTITY-MIB šasijas rinda | `mtxrSerialNumber` | ENTITY-MIB, ja ir |
+
+Neatpazīts ražotājs dabū pēdējo kolonnu un nekādu minēšanu. Nolasīt sveša
+ražotāja privāto OID un tā iegūto nulli pasniegt kā mērījumu ir sliktāk nekā
+nerādīt neko.
+
+Pārbaudīts pret Aruba 2540-48G-PoE+-4SFP+ (JL357A) ar ArubaOS-Switch 16.11, un
+pret RouterOS 7.20–7.21 uz hAP ac³, divām cAP ac un RB2011UiAS.
+
+### Zināmi trūkumi uz RouterOS
+
+- **PoE jaudas mērvienības nav pārbaudītas.** Visām testēšanai pieejamajām
+  MikroTik iekārtām bija viens PoE-out ports ar neko iespraustu, tāpēc spriegums,
+  strāva un jauda visi rādīja nulli un dalītāju apstiprināt nevarēja. Kodā
+  (`profiles.py`) tas ir atzīmēts kā pieņēmums. Ja rādījums izskatās desmitreiz
+  greizs, tas ir iemesls.
+- **VLAN dalība nav pieejama.** RouterOS aizpilda `dot1qPvid`, bet atstāj
+  `dot1qVlanStaticEgressPorts` tukšu, tāpēc netviz rāda PVID un par access vai
+  trunk klusē, nevis min. Apstiprināts uz viena maršrutētāja un trim AP; CRS
+  switch ar bridge VLAN filtering to tabulu var arī aizpildīt, un tad profila
+  pieņēmums par visu ražotāju būtu nepareizs.
+- **Bezvadu daļa vēl nav izvadīta entītijās.** Uz CAPsMAN kontroliera klientu
+  reģistrācijas ir nolasāmas un fixture tās sedz, bet entītiju no tām vēl nav.
 
 ## Instalācija caur HACS
 
@@ -24,6 +63,9 @@ Tikai lasīšana. Nekādu SNMP SET — read-only community vai v3 lietotājs pie
 2. URL: `https://github.com/gun4as/HP-HA`, kategorija **Integration**
 3. Instalē **netviz**, pārstartē Home Assistant
 4. **Iestatījumi → Ierīces un pakalpojumi → Pievienot integrāciju → netviz**
+
+Modeli atstāj uz **Detect ports automatically**, ja vien tavai konkrētajai
+dzelzij nav modeļa faila.
 
 Karti pievienot ar roku Lovelace resursos **nevajag** — integrācija to reģistrē
 pati caur `add_extra_js_url`. Ja pēc pārstarta karte tomēr met `Custom element
@@ -35,16 +77,18 @@ doesn't exist: netviz-faceplate-card`, pārbaudi pēc kārtas:
    parādās tikai pēc pilnas pārlādes.
 3. Ja fails atveras, bet karte joprojām nav, pievieno resursu ar roku:
    **Iestatījumi → Paneļi → trīs punkti → Resursi → Pievienot**, URL
-   `/netviz/netviz-faceplate-card.js`, tips **JavaScript Module**.
+   `/netviz/netviz-faceplate-card.js`, tips **JavaScript Module**. Ņem vērā, ka
+   manuālam resursam nav keša lauzēja parametra, tāpēc pēc atjauninājuma tas
+   turpinās pasniegt veco failu — noņem to, kad automātiskā reģistrācija strādā.
 
 ### Ikona
 
 Integrācija nes savus zīmola attēlus mapē `custom_components/netviz/brand/`, ko
-Home Assistant 2026.3 un jaunāks pasniedz no `/api/brands/integration/netviz/icon.png`,
-priekšroku dodot lokālajam, ne CDN. Pull request uz
-[home-assistant/brands](https://github.com/home-assistant/brands) nav vajadzīgs —
-tā `custom_integrations` mape tagad ir apzīmēta kā legacy. Uz vecākas HA mape
-tiek ignorēta, un HACS rāda savu ģenerēto vietturi.
+Home Assistant 2026.3 un jaunāks pasniedz no
+`/api/brands/integration/netviz/icon.png`, priekšroku dodot lokālajam, ne CDN.
+Pull request uz [home-assistant/brands](https://github.com/home-assistant/brands)
+nav vajadzīgs — tā `custom_integrations` mape tagad ir apzīmēta kā legacy. Uz
+vecākas HA mape tiek ignorēta, un HACS rāda savu ģenerēto vietturi.
 
 Attēli ir ģenerēti, ne zīmēti ar roku, tāpēc tos var pieregulēt un pārzīmēt:
 
@@ -53,24 +97,15 @@ pip install Pillow
 python tools/gen_brand.py
 ```
 
-Tie lieto to pašu krāsu valodu, kas karte — zaļa 1G, zila 10G, dzintars 10/100M,
-pelēka down, oranžs PoE — lai ikona, priekšpanelis un dokumentācija runā vienādi.
-
-### Atkarības
-
-`manifest.json` prasa `pysnmp==7.1.27` — tieši to pašu versiju, ko HA Core jau
-ved līdzi priekš iebūvētās `snmp` un `brother` integrācijām. Tāpēc instalācija
-neko papildus nelejupielādē un nav versiju konflikta.
-
 ## Konfigurācija
 
-Switch pusē pietiek ar read-only piekļuvi. AOS-S:
+Pietiek ar read-only piekļuvi. ArubaOS-Switch:
 
 ```
 snmp-server community "netviz" operator restricted
 ```
 
-SNMPv3 (ieteicams):
+SNMPv3 uz AOS-S (ieteicams):
 
 ```
 snmpv3 enable
@@ -78,8 +113,23 @@ snmpv3 user netviz auth sha <authpass> priv aes <privpass>
 snmpv3 group managerpriv user netviz sec-model ver3
 ```
 
+RouterOS SNMP pēc noklusējuma ir izslēgts. Community, ierobežots ar Home
+Assistant resursdatoru:
+
+```
+/snmp community add name=netviz addresses=<ha-ip>/32 read-access=yes write-access=no
+/snmp set enabled=yes
+```
+
+Ja joprojām neatbild, pārbaudi input ķēdi — noklusējuma ugunsmūris UDP 161 nomet,
+pirms tas sasniedz servisu:
+
+```
+/ip firewall filter print where chain=input
+```
+
 Opcijās (integrācijas kartītē → **Konfigurēt**) var mainīt aptaujas intervālu,
-ieslēgt/izslēgt metrikas, VLAN lasīšanu un to, vai saite uz switch'a web
+ieslēgt un izslēgt metrikas, VLAN lasīšanu un to, vai saite uz iekārtas web
 saskarni iet pa http vai https.
 
 ## Entītiju skaits — izlasi pirms ieslēdz visu
@@ -91,9 +141,9 @@ Uz JL357A:
 | Noklusējums (link, speed, RX, TX, PoE power, PoE status) | **310** |
 | Viss (`ALL_METRICS`) | **518** |
 
-Katra metrika reizinās ar 52 portiem. Ja recorder sāk smakt, izmet `rx_rate`
-un `tx_rate` no opcijām un atstāj tos tikai tur, kur tiešām vajag vēsturi, vai
-izslēdz portu sensorus recorder konfigurācijā:
+Katra metrika reizinās ar portu skaitu, tāpēc piecu portu maršrutētājs nav
+problēma, bet 48 portu switch ir. Ja recorder sāk smakt, izmet `rx_rate` un
+`tx_rate` no opcijām, vai izslēdz portu sensorus recorder konfigurācijā:
 
 ```yaml
 recorder:
@@ -118,9 +168,8 @@ type: custom:netviz-faceplate-card
 faceplate: sensor.sw_2540_faceplate
 ```
 
-Priekšpanelis ir garš un zems — uz JL357A proporcija ir gandrīz 9:1. Kartei
-vajag platumu, citādi porti kļūst niecīgi. Sadaļu panelī (`sections`) dod tam
-pilnu rindu:
+Switch priekšpanelis ir garš un zems — uz JL357A proporcija ir gandrīz 9:1.
+Kartei vajag platumu. Sadaļu panelī dod tam pilnu rindu:
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -129,10 +178,11 @@ grid_options:
   columns: full
 ```
 
-Karte mērogojas pēc konteinera un ritjoslas nav. Portu numuri tiek paslēpti, ja
-tie sanāktu mazāki par ~5,5px — zem ~615px platuma uz 52 portu korpusa. Krāsas
-un tooltip paliek. Ja gribi pilnu izmēru ar horizontālo ritināšanu, uzstādi
-`min_width`:
+Karte mērogojas pēc konteinera un ritjoslas nav. Mazu priekšpaneli tā
+nepalielinās vairāk par 1,4× no dabiskā izmēra, tāpēc piecu portu maršrutētājs
+neaizņem visu paneli. Portu etiķetes tiek paslēptas, ja tās sanāktu mazākas par
+~5,5px — zem ~615px platuma uz 52 portu korpusa — un krāsas ar tooltip paliek. Ja
+gribi pilnu izmēru ar horizontālo ritināšanu, uzstādi `min_width`:
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -144,18 +194,33 @@ Karte ņem ģeometriju no `faceplate` entītijas atribūtiem un stāvokli no pā
 tās pašas ierīces entītijām. Portus tā savāc pēc `port` un `metric` atribūtiem,
 **nevis** pēc entity_id — pārsaukšana neko nesalauž.
 
-Krāsas: zaļa 1G, zila 10G, dzeltena 10/100M, pelēka down. Oranžs punkts nozīmē,
-ka ports padod PoE jaudu; normālā izmērā tas ir stūrī, bet, kad numuri ir
-paslēpti, pārvietojas uz porta vidu. Klikšķis atver porta more-info.
+Krāsas: zaļa 1G, zila 10G, dzintars 10/100M, pelēka down. Oranžs punkts nozīmē,
+ka ports padod PoE jaudu; normālā izmērā tas ir stūrī, bet, kad etiķetes ir
+paslēptas, pārvietojas uz porta vidu. Klikšķis atver porta more-info.
 
-## Jauns switch modelis
+### Bez modeļa faila
+
+Atrastie porti tiek izkārtoti automātiski: no kreisās uz labo tādā secībā, kādā
+iekārta tos pieteica, aiz sešiem pārceļoties uz otro rindu, katrs ports izmērots
+pēc savas etiķetes. Interfeisu nosaukumi tiek saīsināti līdz porta tokenam, jo uz
+RouterOS tāds nosaukums kā `ether1uplink dsl` ir trīsreiz platāks par portu un
+blakus etiķetes pārklājas nesalasāmi; pilnais nosaukums paliek tooltip.
+
+Tas zīmējums ir **portu saraksts, ne korpuss**. Tas nevar zināt, kurā pusē
+fiziski ir SFP ligzda vai kā numurēts priekšpanelis, un ģeometrijā atzīmē sevi ar
+`generated`. Modeļa fails ir tas, kas to pārvērš par īstas dzelzs attēlu.
+
+## Modeļa faili
+
+Modeļa fails ir neobligāts. Tas pievieno priekšpaneļa ģeometriju un neko citu —
+porti vienmēr nāk no pašas iekārtas.
 
 ```bash
 python3 tools/gen_model.py --rj45 48 --sfp 4 --numbering column --sfp-side left \
   -o custom_components/netviz/models/manssvics.json
 ```
 
-Modeļa JSON pieņem, ka porta `ifName` ir tā numurs un PoE indekss ir
+Ģenerētais modelis pieņem, ka porta `ifName` ir tā numurs un PoE indekss ir
 `1.<ports>`. Pārbaudi pret dzelzi:
 
 ```bash
@@ -165,12 +230,11 @@ snmpbulkwalk -v2c -c public -Oqn 192.0.2.10 1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8
 ```
 
 Ja nesakrīt, labo `ifname` vai pievieno `ifindex` katram portam. Vēl divi
-pieņēmumi ir tikai vizuāli: portu numerācija priekšpanelī (nepāra augšā, pāra
-apakšā — `--numbering row`, ja korpusā ir citādi) un tas, kurā pusē ir SFP+
-bloks (`--sfp-side right`). Abus vērts pārbaudīt pret īstas priekšas foto.
+pieņēmumi ir tikai vizuāli: portu numerācija priekšpanelī (`--numbering row`) un
+tas, kurā pusē ir SFP+ bloks (`--sfp-side right`). Abus vērts pārbaudīt pret
+īstas priekšas foto.
 
 SNMP slāni var palaist atsevišķi, bez HA. Failu palaiž tieši, nevis ar `-m`:
-`-m` importētu vecāku paketi, tātad `__init__.py`, tātad visu Home Assistant.
 
 ```bash
 python3 custom_components/netviz/snmp.py 192.0.2.10 public
@@ -178,51 +242,91 @@ python3 custom_components/netviz/snmp.py 192.0.2.10 public
 
 ## Testēšana
 
-Testi negriežas pie dzelžiem — tie strādā pret snapshot'u, kas noņemts no īsta
-switch'a un pēc tam notīrīts. Divi soļi, un otrais ir obligāts:
+```bash
+pip install -r requirements_test.txt
+pytest
+```
+
+Vairāk nekā nevajag — ne HA instalācijas, ne tīkla. `snmp.py`, `model.py` un
+`profiles.py` neimportē HA, un testi tos ielādē tieši no failiem, tāpēc īsts
+`SnmpClient` strādā ar `walk()` un `get_many()`, kas baroti no ierakstīta
+snapshot'a. Viss virs tiem ir ražošanas koda ceļš.
+
+Trīs snapshot'i — no JL357A, MikroTik RB2011 un CAPsMAN kontroliera. Tie atšķiras
+noderīgi, un katra no zemāk minētajām atšķirībām deva nepareizu atbildi, kas
+izskatījās pareiza, līdz tests to pieķēra:
+
+- RB2011 atstāj Q-BRIDGE egress tabulu tukšu, aizpildot `dot1qPvid`, un tāpēc
+  katrs ports iznāca kā `access`, ieskaitot trunkus
+- tas atbild `entPhysicalSerialNum` ar `rb400_usb` no rindas, kuras
+  `entPhysicalClass` ir `unknown` — virkne, kas ir vienāda katram RB2011, un kas
+  būtu sadūrusi divas iekārtas uz viena unique_id
+- `hrProcessorLoad` atdod vienu vērtību uz vienas iekārtas un četras uz citas, ar
+  vienu un to pašu firmware
+- `sysObjectID` atnāk kā `SNMPv2-SMI::enterprises.11...`, ne punktotā formā, jo
+  pysnmp OID izdrukā caur saviem MIB
+
+Testi nekad neaiztiek dzelzi. Snapshot ņem divos soļos, un otrais ir obligāts:
 
 ```bash
 python3 tools/capture_fixture.py 192.0.2.10 public tests/fixtures/mans-live.json
 python3 tools/sanitize_fixture.py tests/fixtures/mans-live.json tests/fixtures/mans.json
 ```
 
-Neapstrādātajā snapshot'ā ir hostname, šasijas un SFP moduļu seriālnumuri, portu
-apraksti ar iekārtu nosaukumiem un VLAN nosaukumi. `sanitize_fixture.py` tos
-aizstāj, saglabājot visu skaitlisko neskartu, un beigās noskrien auditu, kas met
-kļūdu, ja palikusi privāta IP vai MAC adrese. `*-live.json` ir `.gitignore`
-sarakstā, tāpēc neapstrādāto versiju nevar iekomitēt nejauši.
-
-Repozitorijā iekļautais `tests/fixtures/jl357a.json` ir tāds pats sanitizēts
-snapshot no JL357A ar 52 portiem, 22 aktīviem linkiem, sešiem PoE patērētājiem
-un astoņiem VLAN.
+Neapstrādātajā snapshot'ā ir hostname, šasijas un moduļu seriālnumuri, portu
+apraksti ar iekārtu nosaukumiem, VLAN nosaukumi, SSID un katra bezvadu klienta
+MAC adrese. `sanitize_fixture.py` tos visus aizstāj, saglabājot visu skaitlisko
+neskartu, un beigās noskrien auditu, kas met kļūdu, ja palikusi privāta IP vai
+MAC adrese. `*-live.json` ir `.gitignore` sarakstā.
 
 ## Izmantotie OID
+
+Standarta MIB, lasīti uz katras iekārtas:
 
 | Ko | OID | MIB |
 |---|---|---|
 | ifName / ifAlias | `1.3.6.1.2.1.31.1.1.1.1` / `.18` | IF-MIB |
+| ifType — kā atrod fiziskos portus | `1.3.6.1.2.1.2.2.1.3` | IF-MIB |
 | ifOperStatus / ifAdminStatus | `1.3.6.1.2.1.2.2.1.8` / `.7` | IF-MIB |
 | ifHighSpeed | `1.3.6.1.2.1.31.1.1.1.15` | IF-MIB |
 | ifHCInOctets / ifHCOutOctets | `1.3.6.1.2.1.31.1.1.1.6` / `.10` | IF-MIB |
+| sysObjectID — pēc kā izvēlas profilu | `1.3.6.1.2.1.1.2.0` | SNMPv2-MIB |
+| entPhysicalClass / SerialNum | `1.3.6.1.2.1.47.1.1.1.1.5` / `.11` | ENTITY-MIB |
+| dot1dBasePortIfIndex | `1.3.6.1.2.1.17.1.4.1.2` | BRIDGE-MIB |
+| dot1qPvid | `1.3.6.1.2.1.17.7.1.4.5.1.1` | Q-BRIDGE-MIB |
+| dot1qVlanStaticEgress / Untagged | `1.3.6.1.2.1.17.7.1.4.3.1.2` / `.4` | Q-BRIDGE-MIB |
+
+ArubaOS-Switch:
+
+| Ko | OID | MIB |
+|---|---|---|
 | pethPsePortDetectionStatus | `1.3.6.1.2.1.105.1.1.1.6` | POWER-ETHERNET-MIB |
 | pethMainPsePower / Consumption | `1.3.6.1.2.1.105.1.3.1.1.2` / `.4` | POWER-ETHERNET-MIB |
 | hpicfPoePethPsePortActualPower | `1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8` | HP-ICF-POE-MIB (**mW**) |
 | hpSwitchCpuStat | `1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0` | STATISTICS-MIB |
-| entPhysicalSerialNum | `1.3.6.1.2.1.47.1.1.1.1.11` | ENTITY-MIB |
-| dot1dBasePortIfIndex | `1.3.6.1.2.1.17.1.4.1.2` | BRIDGE-MIB |
-| dot1qPvid | `1.3.6.1.2.1.17.7.1.4.5.1.1` | Q-BRIDGE-MIB |
-| dot1qVlanStaticEgress / Untagged | `1.3.6.1.2.1.17.7.1.4.3.1.2` / `.4` | Q-BRIDGE-MIB |
+| hpLocalMemFree / AllocBytes | `...5.1.1.2.1.1.1.6.1` / `.7.1` | NETSWITCH-MIB |
+
+MikroTik RouterOS:
+
+| Ko | OID | MIB |
+|---|---|---|
+| mtxrSerialNumber | `1.3.6.1.4.1.14988.1.1.7.3.0` | MIKROTIK-MIB |
+| mtxrPOEStatus / Power | `1.3.6.1.4.1.14988.1.1.15.1.1.3` / `.6` | MIKROTIK-MIB |
+| hrProcessorLoad | `1.3.6.1.2.1.25.3.3.1.2` | HOST-RESOURCES-MIB |
+| hrStorage — atmiņa | `1.3.6.1.2.1.25.2.3.1.3` … `.6` | HOST-RESOURCES-MIB |
+| CAPsMAN reģistrācijas *(vēl netiek lietots)* | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
 
 HP-ICF-POE-MIB: <https://mibs.observium.org/mib/HP-ICF-POE-MIB/>
 AOS-S 16.11: <https://arubanetworking.hpe.com/techdocs/AOS-S/16.11/MCG/YAYB/content/common%20files/vie-poe-sta-spe-por.htm>
 
 ## Vēl nav
 
+- Bezvadu entītijas no CAPsMAN kontroliera — klienti uz SSID un uz AP, signāla
+  statistika. Dati ir nolasāmi un fixture tos sedz.
+- Atmiņas sensori, lai gan atmiņa jau tiek aptaujāta abiem ražotājiem
 - LLDP kaimiņi (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
 - MAC tabula uz portu (`dot1dTpFdbPort`)
 - Kartes vizuālais redaktors (pagaidām tikai YAML)
-- Atmiņas sensori, lai gan `hpLocalMemFreeBytes` un `hpLocalMemAllocBytes` jau
-  tiek aptaujāti
 - Kopējais taimauts vienam aptaujas ciklam
 
 ## Licence
