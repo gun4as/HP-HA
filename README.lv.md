@@ -37,6 +37,13 @@ doesn't exist: netviz-faceplate-card`, pārbaudi pēc kārtas:
    **Iestatījumi → Paneļi → trīs punkti → Resursi → Pievienot**, URL
    `/netviz/netviz-faceplate-card.js`, tips **JavaScript Module**.
 
+### Ikona
+
+HACS rāda automātiski ģenerētu vietturi, kamēr zīmols nav pieņemts
+[home-assistant/brands](https://github.com/home-assistant/brands) repozitorijā —
+ikonas nekad netiek lasītas no paša custom repozitorija. Attēli un iesniegšanas
+soļi ir [brand/](brand/), ģenerē `brand/gen_icon.py`.
+
 ### Atkarības
 
 `manifest.json` prasa `pysnmp==7.1.27` — tieši to pašu versiju, ko HA Core jau
