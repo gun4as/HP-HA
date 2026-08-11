@@ -232,5 +232,7 @@ AOS-S 16.11: <https://arubanetworking.hpe.com/techdocs/AOS-S/16.11/MCG/YAYB/cont
 
 ## Licence
 
+[MIT](LICENSE).
+
 An independent implementation. Not derived from Switch Vision — that has no
 open-source licence, so neither code nor artwork was taken from it.
