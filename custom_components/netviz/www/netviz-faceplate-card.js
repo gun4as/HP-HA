@@ -12,6 +12,14 @@
  *   title: SW-2540
  */
 
+// PoE indikators nedrīkst balstīties tikai uz toni: iepriekšējais #ff9f1c uz
+// 10/100M porta (#f2b632) bija praktiski neredzams. Dziļāks oranžs plus tumša
+// kontūra nolasās uz zaļa, dzintara, zila un pelēka vienādi labi.
+const POE_COLOR = "#ff6d00";
+const POE_OUTLINE = "rgba(0,0,0,0.75)";
+const POE_DOT_R = 2.6;      // stūrī, blakus numuram
+const POE_DOT_R_BIG = 4.5;  // centrā, kad numuri ir paslēpti un vieta ir brīva
+
 const LABEL_FONT_SIZE = 8;
 // Zem šī izmēra pikseļos portu numuri ir tikai putra - tad tos slēpjam, un
 // paliek krāsas un tooltip. Tāpat dara switch'a paša web saskarne mazā izmērā.
@@ -191,14 +199,15 @@ class NetvizFaceplateCard extends HTMLElement {
       body.setAttribute("stroke-width", "1");
       group.appendChild(body);
 
-      // PoE indikators - mazs punkts porta apakšējā labajā stūrī
+      // PoE indikators. Pozīciju un izmēru uzstāda _applyPoeDotLayout, jo tas
+      // atkarīgs no tā, vai numuri ir redzami.
       let poeDot = null;
       if (port.poe) {
         poeDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        poeDot.setAttribute("cx", Number(port.x) + Number(port.w) - 4);
-        poeDot.setAttribute("cy", Number(port.y) + Number(port.h) - 4);
-        poeDot.setAttribute("r", "2");
         poeDot.setAttribute("fill", "transparent");
+        poeDot.setAttribute("stroke", "transparent");
+        poeDot.setAttribute("stroke-width", "0.8");
+        poeDot.setAttribute("pointer-events", "none");
         group.appendChild(poeDot);
       }
 
@@ -239,7 +248,11 @@ class NetvizFaceplateCard extends HTMLElement {
              <span style="width:10px;height:10px;border-radius:2px;background:${color}"></span>${text}
            </span>`
       )
-      .join("");
+      .join("") +
+      `<span style="display:inline-flex;align-items:center;gap:5px">
+         <span style="width:9px;height:9px;border-radius:50%;background:${POE_COLOR};
+                      box-shadow:0 0 0 1px ${POE_OUTLINE}"></span>PoE
+       </span>`;
     wrap.appendChild(legend);
 
     this._summary = document.createElement("div");
@@ -250,6 +263,9 @@ class NetvizFaceplateCard extends HTMLElement {
     card.appendChild(wrap);
     this.innerHTML = "";
     this.appendChild(card);
+    // Sākotnējā pozīcija, lai punkti nav bez koordinātām, ja ResizeObserver
+    // vēl nav nostrādājis vai to pārlūkā nav
+    this._applyPoeDotLayout(true);
     this._observeLabels(svg);
     this._built = true;
   }
@@ -269,6 +285,7 @@ class NetvizFaceplateCard extends HTMLElement {
       for (const label of this._labels) {
         label.style.display = show ? "" : "none";
       }
+      this._applyPoeDotLayout(show);
     };
     this._labelsShown = undefined;
     if (this._resizeObserver) this._resizeObserver.disconnect();
@@ -277,6 +294,28 @@ class NetvizFaceplateCard extends HTMLElement {
       this._resizeObserver.observe(svg);
     }
     apply();
+  }
+
+  /**
+   * Kad numuri ir paslēpti, porta vidus ir brīvs - tad PoE punkts iet uz centru
+   * un kļūst lielāks. Mazā izmērā 2.6 vienību punkts stūrī izmērogotos uz
+   * pusotra pikseļa un pazustu tāpat kā iepriekš pazuda uz dzintara.
+   */
+  _applyPoeDotLayout(labelsShown) {
+    for (const node of Object.values(this._portNodes || {})) {
+      if (!node.poeDot) continue;
+      const p = node.def;
+      const corner = labelsShown;
+      node.poeDot.setAttribute(
+        "cx",
+        corner ? Number(p.x) + Number(p.w) - 4 : Number(p.x) + Number(p.w) / 2
+      );
+      node.poeDot.setAttribute(
+        "cy",
+        corner ? Number(p.y) + Number(p.h) - 4 : Number(p.y) + Number(p.h) / 2
+      );
+      node.poeDot.setAttribute("r", String(corner ? POE_DOT_R : POE_DOT_R_BIG));
+    }
   }
 
   disconnectedCallback() {
@@ -308,10 +347,9 @@ class NetvizFaceplateCard extends HTMLElement {
         const poe = metrics.poe_power ? Number(metrics.poe_power.state) : 0;
         const delivering =
           metrics.poe_status && metrics.poe_status.state === "delivering";
-        node.poeDot.setAttribute(
-          "fill",
-          delivering || poe > 0 ? "#ff9f1c" : "transparent"
-        );
+        const on = delivering || poe > 0;
+        node.poeDot.setAttribute("fill", on ? POE_COLOR : "transparent");
+        node.poeDot.setAttribute("stroke", on ? POE_OUTLINE : "transparent");
         if (!Number.isNaN(poe)) poeTotal += poe;
       }
 
@@ -368,4 +406,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.2.2 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.2.3 ", "background:#2ea3f2;color:#fff", "");

@@ -1,7 +1,7 @@
 {
   "domain": "netviz",
   "name": "netviz",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "codeowners": ["@gun4as"],
   "config_flow": true,
   "dependencies": ["http", "frontend"],
