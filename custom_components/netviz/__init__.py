@@ -11,7 +11,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .config_flow import _credentials
-from .const import CARD_FILENAME, CARD_URL, CONF_MODEL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    CARD_FILENAME,
+    CARD_URL,
+    CONF_MODEL,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MODEL_AUTO,
+)
 from .coordinator import NetvizConfigEntry, NetvizCoordinator
 from .model import ModelNotFound, load_model
 from .snmp import SnmpClient, SnmpConnectionError
@@ -110,13 +117,16 @@ async def _reconcile_identity(
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: NetvizConfigEntry) -> bool:
-    try:
-        # load_model opens a file - to the executor, otherwise HA complains
-        # about blocking I/O in the event loop
-        model = await hass.async_add_executor_job(load_model, entry.data[CONF_MODEL])
-    except ModelNotFound as err:
-        _LOGGER.error("model not found: %s", err)
-        return False
+    slug = entry.data.get(CONF_MODEL)
+    model = None
+    if slug and slug != MODEL_AUTO:
+        try:
+            # load_model opens a file - to the executor, otherwise HA complains
+            # about blocking I/O in the event loop
+            model = await hass.async_add_executor_job(load_model, slug)
+        except ModelNotFound as err:
+            _LOGGER.error("model not found: %s", err)
+            return False
 
     client = SnmpClient(_credentials(dict(entry.data)))
     scan_interval = int(entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))

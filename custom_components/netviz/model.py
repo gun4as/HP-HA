@@ -47,6 +47,58 @@ def load_model(slug: str) -> dict:
     return data
 
 
+# Same units the generator uses, so a laid-out faceplate and a bundled one look
+# like the same product rather than two different drawings.
+_PORT_W, _PORT_H, _GAP_X, _GAP_Y = 22, 18, 4, 6
+_BLOCK_GAP, _MARGIN_X, _MARGIN_Y, _BLOCK = 14, 26, 26, 12
+
+
+def generated_geometry(ports: list[dict], display: str) -> dict:
+    """Lay discovered ports out when no model file describes the hardware.
+
+    This is a drawing of a port list, not of a chassis: the ports are in the
+    order the device reported them, two rows for anything longer than six. It
+    cannot know where the SFP cage physically sits or how the front panel is
+    numbered - that is what a model file is for - but it beats no faceplate at
+    all on a device nobody has drawn yet.
+    """
+    rows = 2 if len(ports) > 6 else 1
+    columns = -(-len(ports) // rows)  # ceiling division
+    laid_out = []
+    x = _MARGIN_X
+    column_x = []
+    for column in range(columns):
+        if column and rows == 2 and column % (_BLOCK // 2) == 0:
+            x += _BLOCK_GAP
+        column_x.append(x)
+        x += _PORT_W + _GAP_X
+
+    for position, port in enumerate(ports):
+        column, row = divmod(position, rows)
+        laid_out.append({
+            "id": str(port["id"]),
+            "label": str(port.get("label", port["id"])),
+            "kind": port.get("kind", "rj45"),
+            "poe": bool(port.get("poe")),
+            "x": column_x[column],
+            "y": _MARGIN_Y + row * (_PORT_H + _GAP_Y),
+            "w": _PORT_W,
+            "h": _PORT_H,
+        })
+
+    width = (column_x[-1] if column_x else _MARGIN_X) + _PORT_W + _MARGIN_X
+    height = _MARGIN_Y * 2 + _PORT_H * rows + _GAP_Y * (rows - 1)
+    return {
+        "model": None,
+        "display": display,
+        "width": width,
+        "height": height,
+        "viewbox": f"0 0 {width} {height}",
+        "generated": True,
+        "ports": laid_out,
+    }
+
+
 def faceplate_geometry(model: dict) -> dict:
     """Compact geometry for the card - without the SNMP fields."""
     return {

@@ -116,3 +116,46 @@ def test_available_models_reads_display_names():
 def test_unknown_model_raises():
     with pytest.raises(model.ModelNotFound):
         model.load_model("no-such-switch")
+
+
+# ------------------------------------------- geometry for discovered hardware
+
+
+def _discovered(count: int) -> list[dict]:
+    return [{"id": f"ether{i}", "label": f"ether{i}", "poe": i == count} for i in range(1, count + 1)]
+
+
+@pytest.mark.parametrize("count", [2, 5, 11, 24, 52])
+def test_generated_geometry_holds_the_same_invariants_as_a_model(count):
+    """Whatever the port count, the card must be able to draw it."""
+    geometry = model.generated_geometry(_discovered(count), "Test device")
+    ports = geometry["ports"]
+
+    assert len(ports) == count
+    assert geometry["viewbox"] == f"0 0 {geometry['width']} {geometry['height']}"
+    assert geometry["generated"] is True
+
+    for port in ports:
+        assert set(port) == {"id", "label", "kind", "poe", "x", "y", "w", "h"}
+        assert port["x"] + port["w"] <= geometry["width"]
+        assert port["y"] + port["h"] <= geometry["height"]
+
+    boxes = [(p["id"], p["x"], p["y"], p["w"], p["h"]) for p in ports]
+    for i, (id_a, ax, ay, aw, ah) in enumerate(boxes):
+        for id_b, bx, by, bw, bh in boxes[i + 1:]:
+            overlap = ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+            assert not overlap, f"{id_a} and {id_b} overlap at {count} ports"
+
+
+def test_small_devices_get_one_row():
+    """A two-port access point is not a faceplate with an empty second row."""
+    two = model.generated_geometry(_discovered(2), "cAP")
+    assert len({p["y"] for p in two["ports"]}) == 1
+
+    eleven = model.generated_geometry(_discovered(11), "RB2011")
+    assert len({p["y"] for p in eleven["ports"]}) == 2
+
+
+def test_generated_geometry_keeps_the_poe_flag():
+    geometry = model.generated_geometry(_discovered(5), "hAP")
+    assert [p["poe"] for p in geometry["ports"]] == [False, False, False, False, True]

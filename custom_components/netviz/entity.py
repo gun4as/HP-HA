@@ -14,6 +14,19 @@ from .coordinator import NetvizCoordinator
 from .snmp import sw_version_from_descr
 
 
+def _profile_name(system: dict) -> str | None:
+    from .profiles import by_key
+
+    key = system.get("profile")
+    return by_key(key).name if key and key != "generic" else None
+
+
+def _short_descr(system: dict) -> str | None:
+    """First clause of sysDescr - "RouterOS RB2011UiAS-2HnD" and the like."""
+    descr = (system.get("descr") or "").split(",")[0].strip()
+    return descr[:64] or None
+
+
 class NetvizEntity(CoordinatorEntity[NetvizCoordinator]):
     """Base for every netviz entity."""
 
@@ -34,8 +47,10 @@ class NetvizEntity(CoordinatorEntity[NetvizCoordinator]):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
-            manufacturer=model.get("vendor"),
-            model=model.get("display", model.get("model")),
+            # Without a model file, say what the device said about itself
+            # rather than leaving the card blank.
+            manufacturer=model.get("vendor") or _profile_name(system),
+            model=model.get("display") or model.get("model") or _short_descr(system),
             sw_version=sw_version_from_descr(system.get("descr")),
             configuration_url=f"{protocol}://{entry.data[CONF_HOST]}",
             serial_number=entry.data.get("serial"),

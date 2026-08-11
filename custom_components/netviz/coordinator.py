@@ -25,7 +25,7 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
         hass: HomeAssistant,
         entry: ConfigEntry,
         client: SnmpClient,
-        model: dict,
+        model: dict | None,
         scan_interval: int = DEFAULT_SCAN_INTERVAL,
     ) -> None:
         super().__init__(
@@ -36,12 +36,19 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
             config_entry=entry,
         )
         self.client = client
-        self.model = model
-        self.ports = model["ports"]
+        self.model = model or {}
+        # Without a model file the ports are unknown until the device is asked.
+        # The first refresh happens before the platforms load, so by the time
+        # entities are created this list is populated either way.
+        self.ports: list[dict] = list(model["ports"]) if model else []
         self._with_vlans = entry.options.get(CONF_VLANS, True)
 
     async def _async_update_data(self) -> dict:
         try:
+            if not self.ports:
+                self.ports = await self.client.discover_ports()
+                if not self.ports:
+                    raise UpdateFailed("no physical ports found on the device")
             return await self.client.poll(self.ports, with_vlans=self._with_vlans)
         except SnmpConnectionError as err:
             raise UpdateFailed(f"SNMP: {err}") from err
