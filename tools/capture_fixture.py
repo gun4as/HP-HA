@@ -70,6 +70,19 @@ WALK_OIDS = {
     "1.3.6.1.2.1.25.2.3.1.5": ("hrStorageSize", False),
     "1.3.6.1.2.1.25.2.3.1.6": ("hrStorageUsed", False),
     "1.3.6.1.2.1.25.2.3.1.4": ("hrStorageAllocationUnits", False),
+    # --- MikroTik wireless ---------------------------------------------------
+    # On a CAPsMAN controller table 5 holds every client of every managed AP,
+    # which is why the managed APs themselves answer nothing useful.
+    "1.3.6.1.4.1.14988.1.1.1.3.1.4": ("mtxrWlApSsid", False),
+    "1.3.6.1.4.1.14988.1.1.1.3.1.6": ("mtxrWlApClientCount", False),
+    "1.3.6.1.4.1.14988.1.1.1.3.1.7": ("mtxrWlApFreq", False),
+    "1.3.6.1.4.1.14988.1.1.1.3.1.8": ("mtxrWlApBand", False),
+    "1.3.6.1.4.1.14988.1.1.1.3.1.9": ("mtxrWlApNoiseFloor", False),
+    "1.3.6.1.4.1.14988.1.1.1.3.1.10": ("mtxrWlApOverallCCQ", False),
+    "1.3.6.1.4.1.14988.1.1.1.5.1.11": ("mtxrWlCMRegSignal", False),
+    "1.3.6.1.4.1.14988.1.1.1.5.1.12": ("mtxrWlCMRegSsid", False),
+    "1.3.6.1.4.1.14988.1.1.1.5.1.8": ("mtxrWlCMRegTxRate", False),
+    "1.3.6.1.4.1.14988.1.1.1.5.1.9": ("mtxrWlCMRegRxRate", False),
 }
 
 GET_OIDS = {

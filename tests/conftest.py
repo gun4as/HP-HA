@@ -35,6 +35,7 @@ def _load(name: str):
 
 snmp = _load("snmp")
 model = _load("model")
+profiles = _load("profiles")
 
 
 class Snapshot:
@@ -121,3 +122,9 @@ def aruba() -> Snapshot:
 def rb2011() -> Snapshot:
     """MikroTik RB2011: 11 ports, empty Q-BRIDGE, a bogus entPhysicalSerialNum."""
     return Snapshot(FIXTURES / "rb2011.json")
+
+
+@pytest.fixture
+def capsman() -> Snapshot:
+    """MikroTik hAP ac3 acting as CAPsMAN controller: 48 client registrations."""
+    return Snapshot(FIXTURES / "capsman.json")

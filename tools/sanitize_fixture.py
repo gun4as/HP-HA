@@ -45,6 +45,11 @@ KEEP_SERIALS = {"not avail", "not available", "none", "n/a", "unknown", "rb400_u
 OID_MTXR_SERIAL = "1.3.6.1.4.1.14988.1.1.7.3.0"
 OID_MTXR_POE_NAME = "1.3.6.1.4.1.14988.1.1.15.1.1.2"
 OID_HR_STORAGE_DESCR = "1.3.6.1.2.1.25.2.3.1.3"
+OID_WL_AP_SSID = "1.3.6.1.4.1.14988.1.1.1.3.1.4"
+OID_WL_REG_SSID = "1.3.6.1.4.1.14988.1.1.1.5.1.12"
+# The registration table is indexed by the client MAC, six decimal octets
+# followed by the interface index. The values are harmless, the index is not.
+OID_WL_REG_PREFIX = "1.3.6.1.4.1.14988.1.1.1.5.1"
 
 # Storage rows that name generic hardware. Anything else - a USB stick, say -
 # tends to carry a model and a serial in its description.
@@ -187,6 +192,44 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
                 renamed += 1
         if renamed:
             log.append(f"{label}: scrubbed {renamed} values (port token kept)")
+
+    # --- wireless ------------------------------------------------------------
+    # An SSID names a household as surely as a hostname does, and on a CAPsMAN
+    # controller the interface names carry the identity of every access point:
+    # "24Ghz-<ap name>-1-2". Both go. The band prefix goes with them, and that is
+    # deliberate - it is a name the operator chose, not something the device
+    # reports, so nothing may parse a band out of it.
+    ssids: dict[str, str] = {}
+    for oid in (OID_WL_AP_SSID, OID_WL_REG_SSID):
+        table = walks.get(oid, {})
+        for idx, value in list(table.items()):
+            name = value.strip()
+            if not name:
+                continue
+            ssids.setdefault(name, f"ssid-{len(ssids) + 1}")
+            table[idx] = ssids[name]
+    if ssids:
+        log.append(f"SSID: {len(ssids)} unique replaced with ssid-N")
+
+    # The registration table index embeds a client MAC. Re-key it so the rows
+    # keep their shape - six octets plus an interface index - without the MACs.
+    macs: dict[str, str] = {}
+    for oid, table in list(walks.items()):
+        if not oid.startswith(OID_WL_REG_PREFIX):
+            continue
+        rekeyed = {}
+        for idx, value in table.items():
+            parts = idx.split(".")
+            if len(parts) >= 7:
+                mac, tail = ".".join(parts[:6]), ".".join(parts[6:])
+                if mac not in macs:
+                    n = len(macs) + 1
+                    macs[mac] = f"2.0.0.0.{n // 256}.{n % 256}"
+                idx = f"{macs[mac]}.{tail}"
+            rekeyed[idx] = value
+        walks[oid] = rekeyed
+    if macs:
+        log.append(f"CAPsMAN registrations: {len(macs)} client MACs re-keyed")
 
     # --- storage rows --------------------------------------------------------
     # A removable disk row reads like "disk: <brand> <model> [<serial>]" - a model
