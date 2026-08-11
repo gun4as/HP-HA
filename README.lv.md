@@ -39,10 +39,22 @@ doesn't exist: netviz-faceplate-card`, pārbaudi pēc kārtas:
 
 ### Ikona
 
-HACS rāda automātiski ģenerētu vietturi, kamēr zīmols nav pieņemts
-[home-assistant/brands](https://github.com/home-assistant/brands) repozitorijā —
-ikonas nekad netiek lasītas no paša custom repozitorija. Attēli un iesniegšanas
-soļi ir [brand/](brand/), ģenerē `brand/gen_icon.py`.
+Integrācija nes savus zīmola attēlus mapē `custom_components/netviz/brand/`, ko
+Home Assistant 2026.3 un jaunāks pasniedz no `/api/brands/integration/netviz/icon.png`,
+priekšroku dodot lokālajam, ne CDN. Pull request uz
+[home-assistant/brands](https://github.com/home-assistant/brands) nav vajadzīgs —
+tā `custom_integrations` mape tagad ir apzīmēta kā legacy. Uz vecākas HA mape
+tiek ignorēta, un HACS rāda savu ģenerēto vietturi.
+
+Attēli ir ģenerēti, ne zīmēti ar roku, tāpēc tos var pieregulēt un pārzīmēt:
+
+```bash
+pip install Pillow
+python tools/gen_brand.py
+```
+
+Tie lieto to pašu krāsu valodu, kas karte — zaļa 1G, zila 10G, dzintars 10/100M,
+pelēka down, oranžs PoE — lai ikona, priekšpanelis un dokumentācija runā vienādi.
 
 ### Atkarības
 

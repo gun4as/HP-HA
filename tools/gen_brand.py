@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-Generates the brand images for the Home Assistant brands repository.
+Generates the brand images the integration ships with.
+
+Since Home Assistant 2026.3 a custom integration carries its own brand images in
+a `brand/` directory next to manifest.json, and HA serves them from
+/api/brands/integration/<domain>/<image>, where a local image wins over the CDN.
+No pull request against home-assistant/brands is needed - the custom_integrations
+folder over there is now marked legacy. On HA older than 2026.3 the directory is
+simply ignored and HACS falls back to its generated placeholder.
 
 Both use the same colour language as the Lovelace card: green 1G, blue 10G,
 amber 10/100M, grey down, orange PoE.
@@ -13,13 +20,17 @@ actual hardware: an SFP+ cage on the left, then two blocks of four RJ45 columns.
 Everything is drawn at SS times the target size and downscaled with LANCZOS,
 which is the cheapest way to get clean rounded corners out of Pillow.
 
-    python brand/gen_icon.py
+    python tools/gen_brand.py
 
-Output, following https://github.com/home-assistant/brands:
+Output into custom_components/netviz/brand/, sized per the conventions the brands
+repository documents, because those are what HA's own tooling expects:
   icon.png     256x256   square, PNG, transparent, trimmed
   icon@2x.png  512x512
   logo.png     480x160   landscape, shortest side within 128-256
   logo@2x.png  960x320   shortest side within 256-512
+
+`dark_icon.png` and `dark_logo.png` are also supported by HA; this artwork already
+sits on a dark chassis and reads on both themes, so there is no separate variant.
 """
 
 from pathlib import Path
@@ -27,7 +38,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 SS = 8  # supersampling factor
-OUT = Path(__file__).parent
+OUT = Path(__file__).resolve().parent.parent / "custom_components" / "netviz" / "brand"
 
 CHASSIS_FILL = (32, 36, 41, 255)
 CHASSIS_EDGE = (72, 80, 88, 255)
