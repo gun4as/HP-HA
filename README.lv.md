@@ -54,8 +54,9 @@ pret RouterOS 7.20–7.21 uz hAP ac³, divām cAP ac un RB2011UiAS.
   trunk klusē, nevis min. Apstiprināts uz viena maršrutētāja un trim AP; CRS
   switch ar bridge VLAN filtering to tabulu var arī aizpildīt, un tad profila
   pieņēmums par visu ražotāju būtu nepareizs.
-- **Bezvadu daļa vēl nav izvadīta entītijās.** Uz CAPsMAN kontroliera klientu
-  reģistrācijas ir nolasāmas un fixture tās sedz, bet entītiju no tām vēl nav.
+- **Bezvadu daļai vajag kontrolieri.** Pārvaldīta AP par saviem radio neatbild
+  gandrīz neko, tāpēc, norādot netviz uz to, dabū portus un nekādu bezvadu daļu.
+  Norādi uz CAPsMAN kontrolieri, un tas sedz visas AP.
 
 ## Instalācija caur HACS
 
@@ -314,15 +315,29 @@ MikroTik RouterOS:
 | mtxrPOEStatus / Power | `1.3.6.1.4.1.14988.1.1.15.1.1.3` / `.6` | MIKROTIK-MIB |
 | hrProcessorLoad | `1.3.6.1.2.1.25.3.3.1.2` | HOST-RESOURCES-MIB |
 | hrStorage — atmiņa | `1.3.6.1.2.1.25.2.3.1.3` … `.6` | HOST-RESOURCES-MIB |
-| CAPsMAN reģistrācijas *(vēl netiek lietots)* | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
+| CAPsMAN reģistrācijas | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
 
 HP-ICF-POE-MIB: <https://mibs.observium.org/mib/HP-ICF-POE-MIB/>
 AOS-S 16.11: <https://arubanetworking.hpe.com/techdocs/AOS-S/16.11/MCG/YAYB/content/common%20files/vie-poe-sta-spe-por.htm>
 
+## Bezvadu daļa uz CAPsMAN kontroliera
+
+Norādi netviz uz kontrolieri, nevis uz AP. Pārvaldīta AP par saviem radio
+neatbild gandrīz neko — viss ir uz kontroliera — tāpēc viena iekārta sedz visu
+tīklu, ieskaitot tās AP, kas, tieši prasot, izskatās salauztas.
+
+Iegūsti kopējo klientu skaitu, sensoru uz katru SSID un sensoru uz katru AP
+radio, katram atribūtos vidējais, minimālais un maksimālais signāls. Radio
+sensori pēc noklusējuma ir izslēgti, jo kontrolieris ar vairākām AP tādu uztaisa
+daudz.
+
+**Apzināti tikai agregāti.** Reģistrācijas tabula ir indeksēta pēc klienta MAC
+adreses. Taisīt no tām entītijas nozīmētu izsekot visus mājā, Home Assistant tam
+jau ir sava MikroTik integrācija, un šī nav tā. Ir tests, kas apgalvo, ka neviena
+MAC adrese nevar nonākt entītijā.
+
 ## Vēl nav
 
-- Bezvadu entītijas no CAPsMAN kontroliera — klienti uz SSID un uz AP, signāla
-  statistika. Dati ir nolasāmi un fixture tos sedz.
 - Atmiņas sensori, lai gan atmiņa jau tiek aptaujāta abiem ražotājiem
 - LLDP kaimiņi (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
 - MAC tabula uz portu (`dot1dTpFdbPort`)

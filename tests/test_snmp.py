@@ -337,3 +337,68 @@ async def test_generic_profile_reads_no_private_oids(aruba):
     assert data["system"]["poe_budget"] is None
     assert all("poe_power" not in p for p in data["ports"].values())
     assert not any("14988" in oid or "2.14.11" in oid for oid in client.walked)
+
+
+# ------------------------------------------------------------------- wireless
+
+
+async def test_capsman_aggregates_clients_by_ssid_and_by_radio(capsman):
+    from conftest import profiles
+
+    registrations = capsman.walk(profiles.ROUTEROS.wireless.registration_ssid_oid)
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    wireless = data["wireless"]
+
+    assert wireless["clients"] == len(registrations)
+    assert data["system"]["wireless_clients"] == len(registrations)
+
+    # every client is counted once per view, and only once
+    assert sum(v["clients"] for v in wireless["ssids"].values()) == len(registrations)
+    assert sum(v["clients"] for v in wireless["radios"].values()) == len(registrations)
+    assert len(wireless["ssids"]) >= 2
+
+
+async def test_signal_statistics_are_consistent(capsman):
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    buckets = [
+        *data["wireless"]["ssids"].values(),
+        *data["wireless"]["radios"].values(),
+    ]
+    assert buckets
+    for bucket in buckets:
+        assert bucket["signal_min"] <= bucket["signal_avg"] <= bucket["signal_max"]
+        assert -100 < bucket["signal_min"] and bucket["signal_max"] < 0
+
+
+async def test_radios_are_named_from_their_interface(capsman):
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    names = capsman.walk(snmp.OID_IF_NAME)
+    for ifindex, radio in data["wireless"]["radios"].items():
+        assert radio["name"] == names[ifindex].strip()
+
+
+async def test_wireless_never_exposes_a_client(capsman):
+    """Aggregates only.
+
+    The registration table is keyed by client MAC address. Turning those into
+    entities would be tracking everyone in the building, Home Assistant has an
+    integration for that already, and this is not it.
+    """
+    import json
+    import re
+
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    blob = json.dumps(data["wireless"])
+    assert not re.search(r"(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", blob)
+    # the fixture's re-keyed MACs are six dotted octets; none may survive either
+    assert not re.search(r"\b\d{1,3}(?:\.\d{1,3}){5}\b", blob)
+
+    counted = sum(v["clients"] for v in data["wireless"]["ssids"].values())
+    assert counted > 10, "the fixture has plenty of clients, and none are listed"
+
+
+async def test_devices_that_are_not_controllers_report_no_wireless(rb2011, aruba):
+    for snapshot in (rb2011, aruba):
+        data = await FixtureClient(snapshot).poll(snapshot.physical_ports())
+        assert data["wireless"] == {}
+        assert data["system"]["wireless_clients"] is None

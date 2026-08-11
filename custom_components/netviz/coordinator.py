@@ -65,3 +65,10 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
         if not self.data:
             return {}
         return self.data.get("system", {})
+
+    @property
+    def wireless(self) -> dict:
+        """Aggregated wireless clients, empty on anything that is not a controller."""
+        if not self.data:
+            return {}
+        return self.data.get("wireless", {})

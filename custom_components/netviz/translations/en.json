@@ -109,6 +109,15 @@
       },
       "faceplate": {
         "name": "Faceplate"
+      },
+      "wireless_clients": {
+        "name": "Wireless clients"
+      },
+      "ssid_clients": {
+        "name": "{ssid} clients"
+      },
+      "radio_clients": {
+        "name": "{radio} clients"
       }
     }
   }

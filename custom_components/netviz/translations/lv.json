@@ -51,15 +51,29 @@
   },
   "entity": {
     "binary_sensor": {
-      "port_link": { "name": "{port} link" }
+      "port_link": {
+        "name": "{port} link"
+      }
     },
     "sensor": {
-      "port_speed": { "name": "{port} speed" },
-      "port_rx_rate": { "name": "{port} RX" },
-      "port_tx_rate": { "name": "{port} TX" },
-      "port_rx_total": { "name": "{port} RX total" },
-      "port_tx_total": { "name": "{port} TX total" },
-      "port_poe_power": { "name": "{port} PoE power" },
+      "port_speed": {
+        "name": "{port} speed"
+      },
+      "port_rx_rate": {
+        "name": "{port} RX"
+      },
+      "port_tx_rate": {
+        "name": "{port} TX"
+      },
+      "port_rx_total": {
+        "name": "{port} RX total"
+      },
+      "port_tx_total": {
+        "name": "{port} TX total"
+      },
+      "port_poe_power": {
+        "name": "{port} PoE power"
+      },
       "port_poe_status": {
         "name": "{port} PoE status",
         "state": {
@@ -72,14 +86,39 @@
           "unknown": "Nezināms"
         }
       },
-      "port_pvid": { "name": "{port} PVID" },
-      "port_alias": { "name": "{port} apraksts" },
-      "cpu": { "name": "CPU" },
-      "uptime": { "name": "Uptime" },
-      "poe_used": { "name": "PoE patēriņš" },
-      "poe_budget": { "name": "PoE budžets" },
-      "ports_up": { "name": "Aktīvie porti" },
-      "faceplate": { "name": "Faceplate" }
+      "port_pvid": {
+        "name": "{port} PVID"
+      },
+      "port_alias": {
+        "name": "{port} apraksts"
+      },
+      "cpu": {
+        "name": "CPU"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "poe_used": {
+        "name": "PoE patēriņš"
+      },
+      "poe_budget": {
+        "name": "PoE budžets"
+      },
+      "ports_up": {
+        "name": "Aktīvie porti"
+      },
+      "faceplate": {
+        "name": "Faceplate"
+      },
+      "wireless_clients": {
+        "name": "Bezvadu klienti"
+      },
+      "ssid_clients": {
+        "name": "{ssid} klienti"
+      },
+      "radio_clients": {
+        "name": "{radio} klienti"
+      }
     }
   }
 }

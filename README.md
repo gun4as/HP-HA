@@ -54,9 +54,9 @@ against RouterOS 7.20–7.21 on a hAP ac³, two cAP ac and an RB2011UiAS.
   about access versus trunk rather than guessing. This was confirmed on a router
   and three access points; a CRS switch with bridge VLAN filtering may well
   populate the table, and the profile would then be wrong to assume otherwise.
-- **Wireless is not exposed yet.** On a CAPsMAN controller the client
-  registrations are readable and the fixtures cover them, but no entities are
-  built from them.
+- **Wireless needs the controller.** A managed access point answers almost
+  nothing about its own radios, so pointing netviz at one gives ports and no
+  wireless. Point it at the CAPsMAN controller instead and it covers every AP.
 
 ## Installing through HACS
 
@@ -336,15 +336,30 @@ MikroTik RouterOS:
 | mtxrPOEStatus / Power | `1.3.6.1.4.1.14988.1.1.15.1.1.3` / `.6` | MIKROTIK-MIB |
 | hrProcessorLoad | `1.3.6.1.2.1.25.3.3.1.2` | HOST-RESOURCES-MIB |
 | hrStorage — memory | `1.3.6.1.2.1.25.2.3.1.3` … `.6` | HOST-RESOURCES-MIB |
-| CAPsMAN registrations *(not yet used)* | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
+| CAPsMAN registrations | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
 
 HP-ICF-POE-MIB: <https://mibs.observium.org/mib/HP-ICF-POE-MIB/>
 AOS-S 16.11: <https://arubanetworking.hpe.com/techdocs/AOS-S/16.11/MCG/YAYB/content/common%20files/vie-poe-sta-spe-por.htm>
 
+## Wireless, on a CAPsMAN controller
+
+Point netviz at the controller rather than at the access points. A managed AP
+answers almost nothing about its own radios — the controller holds the lot — so
+one device covers the whole estate, including the APs that look broken when
+asked directly.
+
+You get a total client count, a sensor per SSID, and a sensor per radio of per
+access point, each carrying average, minimum and maximum signal as attributes.
+The per-radio sensors are disabled by default, because a controller with several
+APs produces a lot of them.
+
+**Aggregates only, deliberately.** The registration table is keyed by client MAC
+address. Turning those into entities would be tracking everyone in the building,
+Home Assistant already has a MikroTik integration that does device tracking, and
+this is not it. A test asserts that no MAC address can reach an entity.
+
 ## Not there yet
 
-- Wireless entities from a CAPsMAN controller — clients per SSID and per access
-  point, signal statistics. The data is readable and the fixture covers it.
 - Memory sensors, although memory is already polled on both vendors
 - LLDP neighbours (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
 - MAC table per port (`dot1dTpFdbPort`)

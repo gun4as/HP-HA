@@ -197,6 +197,18 @@ async def async_setup_entry(
     ]
     entities.append(NetvizFaceplateSensor(coordinator))
 
+    # Wireless only exists on a CAPsMAN controller. Anything else returns an
+    # empty aggregate and gets no entities rather than a row of zeroes.
+    if wireless := coordinator.wireless:
+        entities.append(
+            NetvizSystemSensor(coordinator, WIRELESS_CLIENTS_SENSOR)
+        )
+        entities += [NetvizSsidSensor(coordinator, ssid) for ssid in wireless["ssids"]]
+        entities += [
+            NetvizRadioSensor(coordinator, ifindex, radio["name"])
+            for ifindex, radio in wireless["radios"].items()
+        ]
+
     for port_def in coordinator.ports:
         for metric in enabled:
             description = PORT_SENSORS.get(metric)
@@ -207,6 +219,85 @@ async def async_setup_entry(
             entities.append(NetvizPortSensor(coordinator, port_def, description))
 
     async_add_entities(entities)
+
+
+WIRELESS_CLIENTS_SENSOR = NetvizSensorDescription(
+    key="wireless_clients",
+    translation_key="wireless_clients",
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:wifi",
+    value_fn=lambda s: s.get("wireless_clients"),
+)
+
+
+class NetvizSsidSensor(NetvizEntity, SensorEntity):
+    """How many clients are on one SSID, across every managed access point."""
+
+    _attr_translation_key = "ssid_clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:wifi"
+
+    def __init__(self, coordinator: NetvizCoordinator, ssid: str) -> None:
+        super().__init__(coordinator, f"wifi_ssid_{ssid}")
+        self._ssid = ssid
+        self._attr_translation_placeholders = {"ssid": ssid}
+
+    @property
+    def _bucket(self) -> dict:
+        return self.coordinator.wireless.get("ssids", {}).get(self._ssid, {})
+
+    @property
+    def native_value(self):
+        # An SSID that has gone quiet has no row at all, and zero is the honest
+        # answer for it - unlike a radio that has genuinely disappeared.
+        return self._bucket.get("clients", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        bucket = self._bucket
+        return {
+            "ssid": self._ssid,
+            "signal_avg": bucket.get("signal_avg"),
+            "signal_min": bucket.get("signal_min"),
+            "signal_max": bucket.get("signal_max"),
+        }
+
+
+class NetvizRadioSensor(NetvizEntity, SensorEntity):
+    """Clients on one radio of one access point, as the controller sees it."""
+
+    _attr_translation_key = "radio_clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:access-point"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self, coordinator: NetvizCoordinator, ifindex: str, name: str
+    ) -> None:
+        # Keyed by ifIndex rather than by name: a CAPsMAN interface is named
+        # after the access point and the band, and renaming either should not
+        # orphan the history.
+        super().__init__(coordinator, f"wifi_radio_{ifindex}")
+        self._ifindex = ifindex
+        self._attr_translation_placeholders = {"radio": name}
+
+    @property
+    def _bucket(self) -> dict:
+        return self.coordinator.wireless.get("radios", {}).get(self._ifindex, {})
+
+    @property
+    def native_value(self):
+        return self._bucket.get("clients", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        bucket = self._bucket
+        return {
+            "interface": bucket.get("name"),
+            "signal_avg": bucket.get("signal_avg"),
+            "signal_min": bucket.get("signal_min"),
+            "signal_max": bucket.get("signal_max"),
+        }
 
 
 class NetvizPortSensor(NetvizPortEntity, SensorEntity):

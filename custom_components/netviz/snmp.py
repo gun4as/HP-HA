@@ -479,6 +479,62 @@ class SnmpClient:
         self._vlan_cache = (now, result)
         return result
 
+    async def _wireless(self, names: dict) -> dict:
+        """Wireless clients, aggregated.
+
+        Read from a CAPsMAN controller, this covers every access point it
+        manages - a managed AP answers almost nothing about its own radios, so
+        asking the controller is both the only way and the cheaper one.
+
+        Aggregates only. The registration table is keyed by client MAC address,
+        and turning those into entities would be device tracking of everyone in
+        the building; Home Assistant has an integration for that already, and
+        this is not it.
+        """
+        source = self.profile.wireless
+        if source is None:
+            return {}
+        registrations = await self.walk(source.registration_ssid_oid)
+        if not registrations:
+            return {}
+        signals = await self.walk(source.registration_signal_oid)
+
+        by_ssid: dict[str, dict] = {}
+        by_radio: dict[str, dict] = {}
+        for index, raw_ssid in registrations.items():
+            ssid = str(raw_ssid).strip() or "(hidden)"
+            # index is the client MAC followed by the interface it is on
+            ifindex = index.split(".")[-1]
+            signal = _as_int(signals.get(index))
+            for bucket in (
+                by_ssid.setdefault(ssid, {"clients": 0, "_signals": []}),
+                by_radio.setdefault(
+                    ifindex,
+                    {
+                        "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                        "clients": 0,
+                        "_signals": [],
+                    },
+                ),
+            ):
+                bucket["clients"] += 1
+                if signal is not None:
+                    bucket["_signals"].append(signal)
+
+        for bucket in (*by_ssid.values(), *by_radio.values()):
+            found = bucket.pop("_signals")
+            bucket["signal_avg"] = round(sum(found) / len(found)) if found else None
+            bucket["signal_min"] = min(found) if found else None
+            bucket["signal_max"] = max(found) if found else None
+
+        return {
+            "clients": len(registrations),
+            "ssids": dict(sorted(by_ssid.items())),
+            "radios": dict(
+                sorted(by_radio.items(), key=lambda kv: kv[1]["name"])
+            ),
+        }
+
     async def _storage(self, match: str) -> tuple[int | None, int | None]:
         """Free and used bytes from an hrStorage row, matched by description.
 
@@ -554,6 +610,8 @@ class SnmpClient:
                 mem_used = _as_int(system_raw.get(memory.used_oid))
             elif memory and memory.storage_match:
                 mem_free, mem_used = await self._storage(memory.storage_match)
+
+            wireless = await self._wireless(names) if self.profile.wireless else {}
 
             main_power = await self.walk(poe.main_power_oid) if (
                 poe and poe.main_power_oid
@@ -676,9 +734,10 @@ class SnmpClient:
                 "poe_used": _as_int(next(iter(main_cons.values()), None)),
                 "ports_up": sum(1 for p in out_ports.values() if p["link"]),
                 "ports_total": len(out_ports),
+                "wireless_clients": wireless.get("clients"),
             }
 
-        return {"system": system, "ports": out_ports}
+        return {"system": system, "ports": out_ports, "wireless": wireless}
 
 
 async def _selftest(host: str, community: str, port: int = 161) -> None:
