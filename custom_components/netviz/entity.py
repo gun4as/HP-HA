@@ -1,4 +1,4 @@
-"""Kopīgā entītiju bāze."""
+"""Shared entity base."""
 
 from __future__ import annotations
 
@@ -13,27 +13,27 @@ from .coordinator import NetvizCoordinator
 
 # AOS-S sysDescr:
 #   Aruba JL357A 2540-48G-PoE+-4SFP+ Switch, revision YC.16.11.0029, ROM ... (...)
-# Vajag `revision` lauku. `split(",")[-1]` paņemtu ROM versiju kopā ar
-# būvēšanas ceļu, nogrieztu pusvārdā.
+# The `revision` field is the one we want. `split(",")[-1]` would pick up the ROM
+# version together with the build path, truncated mid-word.
 _RE_REVISION = re.compile(r"revision\s+([A-Za-z0-9._-]+)", re.IGNORECASE)
 _RE_VERSIONISH = re.compile(r"\b([A-Za-z]{0,3}\.?\d+\.\d+[.\d]*)\b")
 
 
 def sw_version_from_descr(descr: str | None) -> str | None:
-    """Firmware versija no sysDescr, vai None, ja formāts nav atpazīts."""
+    """Firmware version from sysDescr, or None if the format is unrecognised."""
     if not descr:
         return None
     if match := _RE_REVISION.search(descr):
         return match.group(1).rstrip(".,")
-    # Cits ražotājs vai cits formāts: ņemam pirmo, kas izskatās pēc versijas.
-    # Labāk None, nekā ierakstīt kartītē modeļa nosaukumu vai ceļu uz failu.
+    # Different vendor or different format: take the first thing that looks like
+    # a version. None beats putting a model name or a file path on the device page.
     if match := _RE_VERSIONISH.search(descr):
         return match.group(1)
     return None
 
 
 class NetvizEntity(CoordinatorEntity[NetvizCoordinator]):
-    """Bāze visām netviz entītijām."""
+    """Base for every netviz entity."""
 
     _attr_has_entity_name = True
 
@@ -43,8 +43,9 @@ class NetvizEntity(CoordinatorEntity[NetvizCoordinator]):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         model = coordinator.model
         system = coordinator.system
-        # Shēma ir izvēle, nevis pieņēmums: AOS-S web UI bieži ir uz http bez
-        # sertifikāta, un nepareiza shēma padara "Visit device" saiti neejošu.
+        # The scheme is a choice, not an assumption: the AOS-S web UI is often
+        # plain http with no certificate, and the wrong scheme turns the
+        # "Visit device" link into a dead end.
         protocol = entry.options.get(
             CONF_PROTOCOL, entry.data.get(CONF_PROTOCOL, DEFAULT_PROTOCOL)
         )
@@ -60,10 +61,10 @@ class NetvizEntity(CoordinatorEntity[NetvizCoordinator]):
 
 
 class NetvizPortEntity(NetvizEntity):
-    """Entītija, kas piesaistīta konkrētam portam.
+    """An entity bound to one specific port.
 
-    `port` un `metric` atribūti ir tas, pēc kā faceplate karte savāc entītijas
-    kopā - tā nav atkarīga no entity_id nosaukumu shēmas.
+    The `port` and `metric` attributes are how the faceplate card collects
+    entities together, so it does not depend on any entity_id naming scheme.
     """
 
     def __init__(

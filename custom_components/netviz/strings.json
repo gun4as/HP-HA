@@ -3,83 +3,113 @@
     "step": {
       "user": {
         "title": "netviz",
-        "description": "Switch SNMP piekļuve. Pietiek ar read-only.",
+        "description": "Switch SNMP access. Read-only is enough.",
         "data": {
-          "host": "Adrese",
-          "model": "Modelis",
-          "snmp_version": "SNMP versija",
+          "host": "Address",
+          "model": "Model",
+          "snmp_version": "SNMP version",
           "community": "Community",
-          "port": "Ports",
-          "protocol": "Web saskarnes shēma"
+          "port": "Port",
+          "protocol": "Web interface scheme"
         }
       },
       "v3": {
         "title": "SNMPv3",
         "data": {
-          "username": "Lietotājvārds",
-          "auth_protocol": "Autentifikācijas protokols",
-          "auth_key": "Autentifikācijas atslēga",
-          "priv_protocol": "Šifrēšanas protokols",
-          "priv_key": "Šifrēšanas atslēga"
+          "username": "Username",
+          "auth_protocol": "Auth protocol",
+          "auth_key": "Auth key",
+          "priv_protocol": "Privacy protocol",
+          "priv_key": "Privacy key"
         }
       }
     },
     "error": {
-      "cannot_connect": "Agents neatbild. Pārbaudi adresi, community un vai SNMP ir ieslēgts.",
-      "unknown": "Negaidīta kļūda"
+      "cannot_connect": "No response. Check address, community and that SNMP is enabled.",
+      "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Šis switch jau ir pievienots"
+      "already_configured": "This switch is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "netviz iestatījumi",
+        "title": "netviz options",
         "data": {
-          "scan_interval": "Aptaujas intervāls (s)",
-          "entities": "Entītijas uz portu",
-          "vlans": "Lasīt VLAN informāciju",
-          "protocol": "Web saskarnes shēma"
+          "scan_interval": "Scan interval (s)",
+          "entities": "Entities per port",
+          "vlans": "Read VLAN information",
+          "protocol": "Web interface scheme"
         },
         "data_description": {
-          "entities": "Katra izvēle reizinās ar portu skaitu. 48 portiem seši lauki ir ~290 entītijas.",
-          "protocol": "Tikai saitei uz switch'a web saskarni ierīces kartītē. AOS-S bieži ir uz http."
+          "entities": "Each choice multiplies by port count. Six fields on 48 ports is ~290 entities.",
+          "protocol": "Only for the link to the switch web interface on the device page. AOS-S is often http."
         }
       }
     }
   },
   "entity": {
     "binary_sensor": {
-      "port_link": { "name": "{port} link" }
+      "port_link": {
+        "name": "{port} link"
+      }
     },
     "sensor": {
-      "port_speed": { "name": "{port} speed" },
-      "port_rx_rate": { "name": "{port} RX" },
-      "port_tx_rate": { "name": "{port} TX" },
-      "port_rx_total": { "name": "{port} RX total" },
-      "port_tx_total": { "name": "{port} TX total" },
-      "port_poe_power": { "name": "{port} PoE power" },
+      "port_speed": {
+        "name": "{port} speed"
+      },
+      "port_rx_rate": {
+        "name": "{port} RX"
+      },
+      "port_tx_rate": {
+        "name": "{port} TX"
+      },
+      "port_rx_total": {
+        "name": "{port} RX total"
+      },
+      "port_tx_total": {
+        "name": "{port} TX total"
+      },
+      "port_poe_power": {
+        "name": "{port} PoE power"
+      },
       "port_poe_status": {
         "name": "{port} PoE status",
         "state": {
-          "disabled": "Izslēgts",
-          "searching": "Meklē",
-          "delivering": "Padod jaudu",
-          "fault": "Kļūda",
-          "test": "Tests",
-          "other_fault": "Cita kļūda",
-          "unknown": "Nezināms"
+          "disabled": "Disabled",
+          "searching": "Searching",
+          "delivering": "Delivering",
+          "fault": "Fault",
+          "test": "Test",
+          "other_fault": "Other fault",
+          "unknown": "Unknown"
         }
       },
-      "port_pvid": { "name": "{port} PVID" },
-      "port_alias": { "name": "{port} apraksts" },
-      "cpu": { "name": "CPU" },
-      "uptime": { "name": "Uptime" },
-      "poe_used": { "name": "PoE patēriņš" },
-      "poe_budget": { "name": "PoE budžets" },
-      "ports_up": { "name": "Aktīvie porti" },
-      "faceplate": { "name": "Faceplate" }
+      "port_pvid": {
+        "name": "{port} PVID"
+      },
+      "port_alias": {
+        "name": "{port} description"
+      },
+      "cpu": {
+        "name": "CPU"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "poe_used": {
+        "name": "PoE consumption"
+      },
+      "poe_budget": {
+        "name": "PoE budget"
+      },
+      "ports_up": {
+        "name": "Ports up"
+      },
+      "faceplate": {
+        "name": "Faceplate"
+      }
     }
   }
 }

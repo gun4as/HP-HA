@@ -1,12 +1,12 @@
 """
-Asinhronais SNMP klients. Apzināti bez neviena Home Assistant importa, lai
-šo moduli var palaist un testēt atsevišķi. Failu palaiž tieši - ar `-m` tiktu
-importēta vecāku pakete un līdz ar to viss Home Assistant:
+Async SNMP client. Deliberately free of any Home Assistant import so the module
+can be run and tested on its own. Run the file directly - with `-m` Python would
+import the parent package, and with it the whole of Home Assistant:
 
     python3 custom_components/netviz/snmp.py 192.0.2.10 public
 
-Lietojam pysnmp 7.x asyncio API, to pašu versiju, ko HA Core jau ved līdzi
-priekš `snmp` un `brother` integrācijām -> HACS neko papildus neinstalēs.
+Uses the pysnmp 7.x asyncio API, pinned to the same version HA Core already
+ships for its `snmp` and `brother` integrations, so HACS installs nothing extra.
 """
 
 from __future__ import annotations
@@ -61,11 +61,11 @@ OID_PETH_DETECT = "1.3.6.1.2.1.105.1.1.1.6"
 OID_PETH_MAIN_POWER = "1.3.6.1.2.1.105.1.3.1.1.2"
 OID_PETH_MAIN_CONS = "1.3.6.1.2.1.105.1.3.1.1.4"
 
-# --- HP-ICF-POE-MIB (ActualPower ir MILIVATOS) ---
+# --- HP-ICF-POE-MIB (ActualPower is in MILLIWATTS) ---
 OID_HP_POE_MW = "1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8"
-# 1.3.6.1.4.1.11.2.14.11.1.9.1.6.1.4 apzināti netiek lasīts: pret JL357A tas
-# atgriež 370, t.i. maksimālo, nevis atlikušo jaudu (UI tajā pašā mirklī rādīja
-# 346 W atlikuma). Atlikums ir poe_budget - poe_used.
+# 1.3.6.1.4.1.11.2.14.11.1.9.1.6.1.4 is deliberately not read: against a JL357A
+# it returns 370, i.e. the maximum rather than the remaining power (the web UI
+# showed 346 W remaining at the same moment). Remaining is poe_budget - poe_used.
 
 # --- BRIDGE / Q-BRIDGE ---
 OID_BASEPORT_IFINDEX = "1.3.6.1.2.1.17.1.4.1.2"
@@ -73,15 +73,15 @@ OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"
 OID_VLAN_EGRESS = "1.3.6.1.2.1.17.7.1.4.3.1.2"
 OID_VLAN_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"
 
-# --- sistēma ---
+# --- system ---
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
 OID_SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
 OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
-# ENTITY-MIB entPhysicalSerialNum. Tabula, nevis `.1`: uz AOS-S šasija ir
-# indekss 1001, un tabulā ir arī moduļu un barošanas bloku ieraksti, no kuriem
-# daļa ir tukši vai satur ražotāja vietturi.
+# ENTITY-MIB entPhysicalSerialNum. The table, not `.1`: on AOS-S the chassis is
+# index 1001, and the table also holds module and power supply rows, some of
+# which are empty or contain a vendor placeholder.
 OID_ENT_SERIAL_TABLE = "1.3.6.1.2.1.47.1.1.1.1.11"
-# Vērtības, kas formāli nav tukšas, bet seriālnumurs nav
+# Values that are technically non-empty but are not a serial number
 SERIAL_PLACEHOLDERS = {"not avail", "not available", "none", "n/a", "unknown", "0"}
 OID_CPU = "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0"
 OID_MEM_FREE = "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.6.1"
@@ -98,7 +98,7 @@ DETECT_STATUS = {
 
 
 class SnmpConnectionError(Exception):
-    """Agents neatbild vai autentifikācija neizdevās."""
+    """The agent does not answer, or authentication failed."""
 
 
 @dataclass(slots=True)
@@ -125,7 +125,7 @@ class _Snapshot:
 def _auth_data(creds: SnmpCredentials):
     if str(creds.version) == "3":
         if not creds.username:
-            raise SnmpConnectionError("SNMPv3 bez lietotājvārda")
+            raise SnmpConnectionError("SNMPv3 requires a username")
         return UsmUserData(
             creds.username,
             authKey=creds.auth_key or None,
@@ -133,9 +133,9 @@ def _auth_data(creds: SnmpCredentials):
             authProtocol=AUTH_PROTOCOLS.get(creds.auth_protocol, usmHMACSHAAuthProtocol),
             privProtocol=PRIV_PROTOCOLS.get(creds.priv_protocol, usmAesCfb128Protocol),
         )
-    # mpModel 1 = SNMPv2c. SNMPv1 (mpModel 0) netiek atbalstīts: walk() lieto
-    # GETBULK, kas ir tikai v2c+, un v1 GET ar vienu neeksistējošu OID atgriež
-    # noSuchName visam pieprasījumam, nevis per-varbind.
+    # mpModel 1 = SNMPv2c. SNMPv1 (mpModel 0) is not supported: walk() uses
+    # GETBULK, which is v2c and later only, and a v1 GET containing one
+    # non-existent OID returns noSuchName for the whole request, not per varbind.
     return CommunityData(creds.community, mpModel=1)
 
 
@@ -151,7 +151,7 @@ def _as_int(value, default: int | None = None) -> int | None:
 
 
 def _portlist(raw: bytes) -> set[int]:
-    """Q-BRIDGE PortList bitmaps -> dot1dBasePort numuru kopa."""
+    """Q-BRIDGE PortList bitmap -> set of dot1dBasePort numbers."""
     ports: set[int] = set()
     for byte_index, byte in enumerate(raw):
         for bit in range(8):
@@ -161,7 +161,7 @@ def _portlist(raw: bytes) -> set[int]:
 
 
 class SnmpClient:
-    """Viens agents. Dzīvo tik ilgi, cik config entry."""
+    """One agent. Lives as long as the config entry."""
 
     def __init__(self, creds: SnmpCredentials) -> None:
         self._creds = creds
@@ -185,13 +185,13 @@ class SnmpClient:
     def close(self) -> None:
         try:
             self._engine.close_dispatcher()
-        except Exception:  # noqa: BLE001 - aizvēršana nedrīkst mest ārā
-            _LOGGER.debug("dispatcher aizvēršana neizdevās", exc_info=True)
+        except Exception:  # noqa: BLE001 - closing must never raise
+            _LOGGER.debug("closing the dispatcher failed", exc_info=True)
 
-    # ---------------------------------------------------------------- primitīvi
+    # ------------------------------------------------------------- primitives
 
     async def walk(self, base: str, raw_bytes: bool = False) -> dict[str, object]:
-        """Atgriež {indeksa_sufikss: vērtība}. Tukšs koks -> tukšs dict."""
+        """Return {index_suffix: value}. An empty subtree gives an empty dict."""
         target = await self._target()
         out: dict[str, object] = {}
         prefix = base + "."
@@ -233,11 +233,11 @@ class SnmpClient:
         if err_ind:
             raise SnmpConnectionError(str(err_ind))
         if err_stat:
-            # Pieprasījums kā vienība neizdevās (tooBig, genErr, ...). Varbind
-            # vērtības tādā gadījumā nav lietojamas, un tās klusi atgriezt
-            # nozīmētu rādīt None visiem sistēmas sensoriem bez pēdas logā.
+            # The request failed as a whole (tooBig, genErr, ...). The varbind
+            # values are unusable in that case, and returning them silently
+            # would show None for every system sensor with nothing in the log.
             raise SnmpConnectionError(
-                f"GET neizdevās: {err_stat.prettyPrint()} "
+                f"GET failed: {err_stat.prettyPrint()} "
                 f"(varbind {int(_idx) if _idx else '?'})"
             )
         out: dict[str, object] = {}
@@ -248,19 +248,20 @@ class SnmpClient:
             out[_numeric(oid)] = value
         return out
 
-    # ------------------------------------------------------------------ augstāk
+    # ------------------------------------------------------------ higher level
 
     async def _serial(self) -> str | None:
-        """Šasijas seriālnumurs no entPhysicalSerialNum.
+        """Chassis serial number from entPhysicalSerialNum.
 
-        Ņem pirmo lietojamo vērtību augošā indeksu secībā, jo šasija ENTITY-MIB
-        tabulā vienmēr ir pirms tajā iespraustajiem moduļiem. Izmet tukšos, kā
-        arī ražotāja vietturus un moduļu seriālnumurus ar liekām atstarpēm.
+        Takes the first usable value in ascending index order, because in
+        ENTITY-MIB the chassis always precedes the modules plugged into it.
+        Skips empty values, vendor placeholders, and pads away the stray
+        whitespace that module serial numbers tend to carry.
         """
         try:
             table = await self.walk(OID_ENT_SERIAL_TABLE)
         except SnmpConnectionError:
-            _LOGGER.debug("entPhysicalSerialNum nav pieejams", exc_info=True)
+            _LOGGER.debug("entPhysicalSerialNum is not available", exc_info=True)
             return None
         for index in sorted(table, key=lambda k: [int(p) for p in k.split(".")]):
             value = str(table[index]).strip()
@@ -269,11 +270,11 @@ class SnmpClient:
         return None
 
     async def probe(self) -> dict[str, str | None]:
-        """Config flow validācijai. Met SnmpConnectionError, ja agents klusē."""
+        """For config flow validation. Raises SnmpConnectionError on silence."""
         async with self._lock:
             data = await self.get_many([OID_SYS_NAME, OID_SYS_DESCR])
             if not data:
-                raise SnmpConnectionError("agents neatbildēja")
+                raise SnmpConnectionError("the agent did not respond")
             serial = await self._serial()
         return {
             "name": str(data.get(OID_SYS_NAME, "")).strip() or None,
@@ -326,7 +327,7 @@ class SnmpClient:
         return result
 
     async def poll(self, ports: list[dict], with_vlans: bool = True) -> dict:
-        """Viens pilns cikls. `ports` nāk no modeļa JSON."""
+        """One full cycle. `ports` comes from the model JSON."""
         async with self._lock:
             loop = asyncio.get_running_loop()
             names = await self.walk(OID_IF_NAME)
@@ -397,8 +398,8 @@ class SnmpClient:
                     "link": _as_int(oper.get(key)) == 1,
                     "admin_up": _as_int(admin.get(key)) == 1,
                     "speed": _as_int(speed.get(key)),
-                    # AOS-S atdod ifAlias tā, kā tas ierakstīts konfigurācijā,
-                    # un tur mēdz būt atstarpe priekšā
+                    # AOS-S returns ifAlias exactly as configured, and there is
+                    # often a leading space in there
                     "alias": str(alias.get(key, "") or "").strip(),
                     "rx_bytes": rx,
                     "tx_bytes": tx,
@@ -429,17 +430,18 @@ class SnmpClient:
 
             self._prev = snap
 
-            # Ja modeļa `ifname` nesakrīt ar to, ko atdod switch, porti klusi
-            # pazustu un visas entītijas kļūtu nepieejamas bez paskaidrojuma.
-            # Brīdinām, bet tikai kad kopa mainās - citādi spams ik 30 sekundes.
+            # If the model's `ifname` does not match what the switch returns,
+            # ports would silently vanish and every entity would go unavailable
+            # with no explanation. Warn, but only when the set changes -
+            # otherwise this spams the log every 30 seconds.
             unmatched = frozenset(
                 str(p["id"]) for p in ports if str(p["id"]) not in out_ports
             )
             if unmatched != self._unmatched:
                 if unmatched:
                     _LOGGER.warning(
-                        "%s: %d no %d modeļa portiem nesakrita ar switch'a ifName; "
-                        "nesakritušie: %s; switch atdeva: %s",
+                        "%s: %d of %d model ports did not match the switch ifName; "
+                        "unmatched: %s; switch returned: %s",
                         self._creds.host,
                         len(unmatched),
                         len(ports),
@@ -447,7 +449,7 @@ class SnmpClient:
                         sorted(by_name)[:10],
                     )
                 elif self._unmatched:
-                    _LOGGER.info("%s: visi modeļa porti atkal sakrīt", self._creds.host)
+                    _LOGGER.info("%s: all model ports match again", self._creds.host)
                 self._unmatched = unmatched
 
             uptime = _as_int(system_raw.get(OID_SYS_UPTIME))

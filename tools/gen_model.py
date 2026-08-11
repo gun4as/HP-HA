@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Ģenerē modeļa JSON ar portu sarakstu un faceplate ģeometriju.
+Generates a model JSON with the port list and the faceplate geometry.
 
-Ģeometrija ir SVG koordinātas, ko vēlāk lasīs Lovelace karte. Vienības -
-patvaļīgas viewBox vienības, karte mērogo pēc konteinera platuma.
+The geometry is SVG coordinates that the Lovelace card reads later. The units are
+arbitrary viewBox units; the card scales to its container width.
 
-Numerācija: HP/Aruba fiksētajos 48 portu korpusos porti iet pa kolonnām -
-augšā nepāra, apakšā pāra. Pārslēdz ar --numbering row, ja izrādās citādi.
+Numbering: on the fixed 48 port HP/Aruba chassis the ports run down the columns -
+odd on top, even below. Switch with --numbering row if it turns out otherwise.
 
-SFP+ puse: uz JL357A tie fiziski ir pa KREISI no porta 1, un tāpat tos zīmē
-switch'a paša web saskarne. Uz citiem korpusiem uplinki mēdz būt pa labi -
-tad --sfp-side right.
+SFP+ side: on a JL357A they sit physically to the LEFT of port 1, and the switch's
+own web UI draws them there too. On other chassis the uplinks tend to be on the
+right - then use --sfp-side right.
 """
 
 import argparse
@@ -20,12 +20,12 @@ PORT_W = 22
 PORT_H = 18
 GAP_X = 4
 GAP_Y = 6
-BLOCK_GAP = 14      # atstarpe starp 12 portu blokiem
+BLOCK_GAP = 14      # gap between blocks of 12 ports
 MARGIN_X = 26
 MARGIN_Y = 26
 SFP_W = 30
 SFP_H = 18
-SFP_GAP = 42        # atstarpe starp RJ45 lauku un SFP+ bloku
+SFP_GAP = 42        # gap between the RJ45 field and the SFP+ block
 
 
 def build(
@@ -40,7 +40,7 @@ def build(
     sfp_cols = (sfp + 1) // 2
     ports: list[dict] = []
 
-    # --- kolonnu x koordinātas -----------------------------------------------
+    # --- column x coordinates ------------------------------------------------
     x = MARGIN_X
     sfp_x: list[int] = []
     if sfp and sfp_side == "left":
@@ -58,7 +58,7 @@ def build(
         x0 = col_x[-1] + PORT_W + SFP_GAP
         sfp_x = [x0 + i * (SFP_W + GAP_X) for i in range(sfp_cols)]
 
-    # `col` ir vizuālais kolonnas indekss no kreisās puses - to lieto karte
+    # `col` is the visual column index from the left - the card uses it
     rj45_col0 = sfp_cols if sfp_side == "left" else 0
     sfp_col0 = 0 if sfp_side == "left" else cols
 
@@ -101,8 +101,8 @@ def build(
         })
 
     ports.sort(key=lambda p: int(p["id"]))
-    # pēc x, nevis pēc pēdējā porta: ar SFP+ pa kreisi pēdējais ports nav
-    # arī tālākais pa labi
+    # by x, not by the last port: with SFP+ on the left the last port is not
+    # also the rightmost one
     width = max(p["x"] + p["w"] for p in ports) + MARGIN_X
     height = MARGIN_Y * 2 + PORT_H * 2 + GAP_Y
 
@@ -147,7 +147,7 @@ def main():
     with open(a.output, "w", encoding="utf-8") as fh:
         json.dump(model, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
-    print(f"{a.output}: {len(model['ports'])} porti, "
+    print(f"{a.output}: {len(model['ports'])} ports, "
           f"viewBox {model['faceplate']['viewbox']}, SFP+ {a.sfp_side}")
 
 

@@ -1,4 +1,4 @@
-"""Aptaujas koordinators."""
+"""Polling coordinator."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ type NetvizConfigEntry = ConfigEntry[NetvizCoordinator]
 
 
 class NetvizCoordinator(DataUpdateCoordinator[dict]):
-    """Aptaujā vienu switch'u un tur pēdējo momentuzņēmumu."""
+    """Polls one switch and holds the most recent snapshot."""
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
         except SnmpConnectionError as err:
             raise UpdateFailed(f"SNMP: {err}") from err
         except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(f"negaidīta kļūda: {err}") from err
+            raise UpdateFailed(f"unexpected error: {err}") from err
 
     def port_data(self, port_id: str) -> dict:
         if not self.data:

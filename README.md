@@ -1,55 +1,60 @@
 # netviz
 
-Pārvaldāmu tīkla switch'u vizualizācija Home Assistant. SNMP aptauja notiek
-pašā HA — nav ne MQTT, ne atsevišķa konteinera, ne add-on'a.
+Managed network switch visualisation for Home Assistant. The SNMP polling happens
+inside HA itself — no MQTT, no separate container, no add-on.
 
-Pirmais modelis: **Aruba 2540-48G-PoE+-4SFP+ (JL357A)**, ArubaOS-Switch 16.x.
+First model: **Aruba 2540-48G-PoE+-4SFP+ (JL357A)**, ArubaOS-Switch 16.x.
 
-Tikai lasīšana. Nekādu SNMP SET — read-only community vai v3 lietotājs pietiek.
+Read-only. No SNMP SET anywhere — a read-only community or v3 user is enough.
 
-## Kas ir iekšā
+*Latviski: [README.lv.md](README.lv.md)*
 
-- Config flow ar SNMPv1/v2c/v3 (SHA/MD5 + AES/AES192/AES256/DES)
-- Ierīce uz switch'u, entītijas uz portu: link, ātrums, RX/TX, PoE jauda,
-  PoE statuss, PVID, apraksts
-- Sistēmas sensori: CPU, uptime, PoE patēriņš un budžets, aktīvo portu skaits
-- Faceplate Lovelace karte, ko integrācija reģistrē pati
-- Modeļa definīcija JSON failā — jauns switch modelis nav koda izmaiņa
+## What is in it
 
-## Instalācija caur HACS
+- Config flow with SNMPv2c and v3 (SHA/MD5 + AES/AES192/AES256/DES)
+- One device per switch, entities per port: link, speed, RX/TX, PoE power,
+  PoE status, PVID, description
+- System sensors: CPU, uptime, PoE consumption and budget, ports up
+- A faceplate Lovelace card that the integration registers by itself
+- The model definition lives in a JSON file — a new switch model is not a code
+  change
 
-1. HACS → trīs punkti → **Custom repositories**
-2. URL: `https://github.com/gun4as/HP-HA`, kategorija **Integration**
-3. Instalē **netviz**, pārstartē Home Assistant
-4. **Iestatījumi → Ierīces un pakalpojumi → Pievienot integrāciju → netviz**
+## Installing through HACS
 
-Karti pievienot ar roku Lovelace resursos **nevajag** — integrācija to reģistrē
-pati caur `add_extra_js_url`. Ja pēc pārstarta karte tomēr met `Custom element
-doesn't exist: netviz-faceplate-card`, pārbaudi pēc kārtas:
+1. HACS → three dots → **Custom repositories**
+2. URL: `https://github.com/gun4as/HP-HA`, category **Integration**
+3. Install **netviz**, restart Home Assistant
+4. **Settings → Devices & services → Add integration → netviz**
 
-1. Vai fails ir pieejams: `http://<tava-ha>:8123/netviz/netviz-faceplate-card.js`.
-   Ja tas dod 404, HACS nav nolejupielādējis `www/` mapi — pārlādē integrāciju.
-2. `Ctrl+Shift+R` pārlūkā. Resursu saraksts tiek kešots, un jauns skripts
-   parādās tikai pēc pilnas pārlādes.
-3. Ja fails atveras, bet karte joprojām nav, pievieno resursu ar roku:
-   **Iestatījumi → Paneļi → trīs punkti → Resursi → Pievienot**, URL
-   `/netviz/netviz-faceplate-card.js`, tips **JavaScript Module**.
+You do **not** need to add the card to the Lovelace resources by hand — the
+integration registers it through `add_extra_js_url`. If after a restart the card
+still reports `Custom element doesn't exist: netviz-faceplate-card`, check in
+this order:
 
-### Atkarības
+1. Is the file reachable: `http://<your-ha>:8123/netviz/netviz-faceplate-card.js`.
+   A 404 means HACS did not download the `www/` directory — redownload the
+   integration.
+2. `Ctrl+Shift+R` in the browser. The resource list is cached, and a new script
+   only shows up after a full reload.
+3. If the file opens but the card is still missing, add the resource by hand:
+   **Settings → Dashboards → three dots → Resources → Add**, URL
+   `/netviz/netviz-faceplate-card.js`, type **JavaScript Module**.
 
-`manifest.json` prasa `pysnmp==7.1.27` — tieši to pašu versiju, ko HA Core jau
-ved līdzi priekš iebūvētās `snmp` un `brother` integrācijām. Tāpēc instalācija
-neko papildus nelejupielādē un nav versiju konflikta.
+### Dependencies
 
-## Konfigurācija
+`manifest.json` pins `pysnmp==7.1.27` — exactly the version HA Core already ships
+for its built-in `snmp` and `brother` integrations. Installing therefore downloads
+nothing extra and cannot create a version conflict.
 
-Switch pusē pietiek ar read-only piekļuvi. AOS-S:
+## Configuration
+
+Read-only access is enough on the switch side. AOS-S:
 
 ```
 snmp-server community "netviz" operator restricted
 ```
 
-SNMPv3 (ieteicams):
+SNMPv3 (recommended):
 
 ```
 snmpv3 enable
@@ -57,21 +62,22 @@ snmpv3 user netviz auth sha <authpass> priv aes <privpass>
 snmpv3 group managerpriv user netviz sec-model ver3
 ```
 
-Opcijās (integrācijas kartītē → **Konfigurēt**) var mainīt aptaujas intervālu,
-ieslēgt/izslēgt metrikas un VLAN lasīšanu.
+The options (integration card → **Configure**) let you change the poll interval,
+turn individual metrics on and off, read or skip VLAN information, and pick
+whether the device page links to the switch over http or https.
 
-## Entītiju skaits — izlasi pirms ieslēdz visu
+## Entity count — read this before enabling everything
 
-Uz JL357A:
+On a JL357A:
 
-| Ieslēgts | Entītijas |
+| Enabled | Entities |
 |---|---|
-| Noklusējums (link, speed, RX, TX, PoE power, PoE status) | **310** |
-| Viss (`ALL_METRICS`) | **518** |
+| Default (link, speed, RX, TX, PoE power, PoE status) | **310** |
+| Everything (`ALL_METRICS`) | **518** |
 
-Katra metrika reizinās ar 52 portiem. Ja recorder sāk smakt, izmet `rx_rate`
-un `tx_rate` no opcijām un atstāj tos tikai tur, kur tiešām vajag vēsturi, vai
-izslēdz portu sensorus recorder konfigurācijā:
+Every metric multiplies by 52 ports. If the recorder starts to struggle, drop
+`rx_rate` and `tx_rate` from the options and keep them only where the history is
+genuinely useful, or exclude the port sensors in the recorder config:
 
 ```yaml
 recorder:
@@ -81,7 +87,7 @@ recorder:
       - sensor.*_tx_total
 ```
 
-## Faceplate karte
+## Faceplate card
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -89,16 +95,16 @@ device: <device_id>
 title: SW-2540
 ```
 
-vai bez device_id:
+or without a device_id:
 
 ```yaml
 type: custom:netviz-faceplate-card
 faceplate: sensor.sw_2540_faceplate
 ```
 
-Priekšpanelis ir garš un zems — uz JL357A proporcija ir gandrīz 9:1. Kartei
-vajag platumu, citādi porti kļūst niecīgi. Sadaļu panelī (`sections`) dod tam
-pilnu rindu:
+A faceplate is long and low — on a JL357A the aspect ratio is close to 9:1. The
+card needs width, otherwise the ports end up tiny. In a sections dashboard, give
+it a full row:
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -107,10 +113,10 @@ grid_options:
   columns: full
 ```
 
-Karte mērogojas pēc konteinera un ritjoslas nav. Portu numuri tiek paslēpti, ja
-tie sanāktu mazāki par ~5,5px — zem ~615px platuma uz 52 portu korpusa. Krāsas
-un tooltip paliek. Ja gribi pilnu izmēru ar horizontālo ritināšanu, uzstādi
-`min_width`:
+The card scales to its container and has no scrollbar. Port numbers are hidden
+when they would render below about 5.5px — under roughly 615px of card width on a
+52 port chassis. The colours and the tooltip stay. If you would rather have full
+size with horizontal scrolling, set `min_width`:
 
 ```yaml
 type: custom:netviz-faceplate-card
@@ -118,22 +124,24 @@ faceplate: sensor.sw_2540_faceplate
 min_width: 820
 ```
 
-Karte ņem ģeometriju no `faceplate` entītijas atribūtiem un stāvokli no pārējām
-tās pašas ierīces entītijām. Portus tā savāc pēc `port` un `metric` atribūtiem,
-**nevis** pēc entity_id — pārsaukšana neko nesalauž.
+The card takes its geometry from the `faceplate` entity attributes and the live
+state from the other entities of the same device. It collects ports by their
+`port` and `metric` attributes, **not** by entity_id — renaming breaks nothing.
 
-Krāsas: zaļa 1G, zila 10G, dzeltena 10/100M, pelēka down. Oranžs punkts porta
-stūrī = PoE padod jaudu. Klikšķis atver porta more-info.
+Colours: green 1G, blue 10G, amber 10/100M, grey down. An orange dot means the
+port is delivering PoE; it sits in the corner at normal size and moves to the
+middle of the port once the numbers are hidden. Clicking a port opens its
+more-info dialog.
 
-## Jauns switch modelis
+## A new switch model
 
 ```bash
-python3 tools/gen_model.py --rj45 48 --sfp 4 --numbering column \
-  -o custom_components/netviz/models/manssvičs.json
+python3 tools/gen_model.py --rj45 48 --sfp 4 --numbering column --sfp-side left \
+  -o custom_components/netviz/models/myswitch.json
 ```
 
-Modeļa JSON pieņem, ka porta `ifName` ir tā numurs un PoE indekss ir
-`1.<ports>`. Pārbaudi pret dzelzi:
+The generated model assumes the port `ifName` is its number and that the PoE
+index is `1.<port>`. Verify against the hardware:
 
 ```bash
 snmpbulkwalk -v2c -c public -Oqn 192.0.2.10 1.3.6.1.2.1.31.1.1.1.1
@@ -141,40 +149,42 @@ snmpbulkwalk -v2c -c public -Oqn 192.0.2.10 1.3.6.1.2.1.105.1.1.1.6
 snmpbulkwalk -v2c -c public -Oqn 192.0.2.10 1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8
 ```
 
-Ja nesakrīt, labo `ifname` vai pievieno `ifindex` katram portam. Trešais
-pieņēmums ir vizuāls — portu numerācija priekšpanelī (nepāra augšā, pāra
-apakšā). Ja korpusā ir citādi: `--numbering row`.
+If they do not line up, fix `ifname` or add an explicit `ifindex` to each port.
+Two more assumptions are purely visual: the numbering across the faceplate (odd
+on top, even below — `--numbering row` if your chassis differs) and which side
+the SFP+ cage sits on (`--sfp-side right`). Both are worth checking against a
+photo of the actual front panel.
 
-SNMP slāni var palaist atsevišķi, bez HA. Failu palaiž tieši, nevis ar `-m`:
-`-m` importētu vecāku paketi, tātad `__init__.py`, tātad visu Home Assistant.
+The SNMP layer runs on its own, without HA. Run the file directly rather than
+with `-m`: `-m` would import the parent package, hence `__init__.py`, hence all
+of Home Assistant.
 
 ```bash
 python3 custom_components/netviz/snmp.py 192.0.2.10 public
 ```
 
-## Testēšana
+## Testing
 
-Testi negriežas pie dzelžiem — tie strādā pret snapshot'u, kas noņemts no īsta
-switch'a un pēc tam notīrīts. Divi soļi, un otrais ir obligāts:
+The tests never touch hardware — they run against a snapshot taken from a real
+switch and then scrubbed. Two steps, and the second one is mandatory:
 
 ```bash
-python3 tools/capture_fixture.py 192.0.2.10 public tests/fixtures/mans-live.json
-python3 tools/sanitize_fixture.py tests/fixtures/mans-live.json tests/fixtures/mans.json
+python3 tools/capture_fixture.py 192.0.2.10 public tests/fixtures/mine-live.json
+python3 tools/sanitize_fixture.py tests/fixtures/mine-live.json tests/fixtures/mine.json
 ```
 
-Neapstrādātajā snapshot'ā ir hostname, šasijas un SFP moduļu seriālnumuri, portu
-apraksti ar iekārtu nosaukumiem un VLAN nosaukumi. `sanitize_fixture.py` tos
-aizstāj, saglabājot visu skaitlisko neskartu, un beigās noskrien auditu, kas met
-kļūdu, ja palikusi privāta IP vai MAC adrese. `*-live.json` ir `.gitignore`
-sarakstā, tāpēc neapstrādāto versiju nevar iekomitēt nejauši.
+A raw snapshot contains the hostname, the chassis and SFP module serial numbers,
+port descriptions naming actual devices, and VLAN names. `sanitize_fixture.py`
+replaces all of it, leaves every numeric value untouched, and finishes with an
+audit that fails if a private IP or MAC address survived. `*-live.json` is in
+`.gitignore`, so the raw version cannot be committed by accident.
 
-Repozitorijā iekļautais `tests/fixtures/jl357a.json` ir tāds pats sanitizēts
-snapshot no JL357A ar 52 portiem, 22 aktīviem linkiem, sešiem PoE patērētājiem
-un astoņiem VLAN.
+The bundled `tests/fixtures/jl357a.json` is exactly such a scrubbed snapshot from
+a JL357A with 52 ports, 22 links up, six PoE consumers and eight VLANs.
 
-## Izmantotie OID
+## OIDs used
 
-| Ko | OID | MIB |
+| What | OID | MIB |
 |---|---|---|
 | ifName / ifAlias | `1.3.6.1.2.1.31.1.1.1.1` / `.18` | IF-MIB |
 | ifOperStatus / ifAdminStatus | `1.3.6.1.2.1.2.2.1.8` / `.7` | IF-MIB |
@@ -184,6 +194,7 @@ un astoņiem VLAN.
 | pethMainPsePower / Consumption | `1.3.6.1.2.1.105.1.3.1.1.2` / `.4` | POWER-ETHERNET-MIB |
 | hpicfPoePethPsePortActualPower | `1.3.6.1.4.1.11.2.14.11.1.9.1.1.1.8` | HP-ICF-POE-MIB (**mW**) |
 | hpSwitchCpuStat | `1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0` | STATISTICS-MIB |
+| entPhysicalSerialNum | `1.3.6.1.2.1.47.1.1.1.1.11` | ENTITY-MIB |
 | dot1dBasePortIfIndex | `1.3.6.1.2.1.17.1.4.1.2` | BRIDGE-MIB |
 | dot1qPvid | `1.3.6.1.2.1.17.7.1.4.5.1.1` | Q-BRIDGE-MIB |
 | dot1qVlanStaticEgress / Untagged | `1.3.6.1.2.1.17.7.1.4.3.1.2` / `.4` | Q-BRIDGE-MIB |
@@ -191,13 +202,16 @@ un astoņiem VLAN.
 HP-ICF-POE-MIB: <https://mibs.observium.org/mib/HP-ICF-POE-MIB/>
 AOS-S 16.11: <https://arubanetworking.hpe.com/techdocs/AOS-S/16.11/MCG/YAYB/content/common%20files/vie-poe-sta-spe-por.htm>
 
-## Vēl nav
+## Not there yet
 
-- LLDP kaimiņi (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
-- MAC tabula uz portu (`dot1dTpFdbPort`)
-- Kartes vizuālais redaktors (pagaidām tikai YAML)
+- LLDP neighbours (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
+- MAC table per port (`dot1dTpFdbPort`)
+- A visual editor for the card (YAML only for now)
+- Memory sensors, although `hpLocalMemFreeBytes` and `hpLocalMemAllocBytes` are
+  already polled
+- An overall timeout around one poll cycle
 
 ## Licence
 
-Neatkarīga implementācija. Nav atvasināta no Switch Vision — tam nav
-open-source licences, tāpēc no turienes nav ņemts ne kods, ne attēli.
+An independent implementation. Not derived from Switch Vision — that has no
+open-source licence, so neither code nor artwork was taken from it.

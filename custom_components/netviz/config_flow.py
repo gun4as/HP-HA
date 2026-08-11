@@ -1,4 +1,4 @@
-"""Konfigurācijas plūsma."""
+"""Config flow."""
 
 from __future__ import annotations
 
@@ -108,10 +108,10 @@ class NetvizConfigFlow(ConfigFlow, domain=DOMAIN):
         self._models: dict[str, str] | None = None
 
     async def _available_models(self) -> dict[str, str]:
-        """Modeļu saraksts no diska.
+        """The list of models on disk.
 
-        Iet caur izpildītāju: `available_models` atver failus, un HA detektē
-        blokējošu I/O event loop'ā un met brīdinājumu ar stack trace.
+        Goes through the executor: `available_models` opens files, and HA detects
+        blocking I/O in the event loop and logs a warning with a stack trace.
         """
         if self._models is None:
             self._models = await self.hass.async_add_executor_job(available_models)
@@ -152,10 +152,10 @@ class NetvizConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _show(
         self, step_id: str, schema: vol.Schema, errors: dict[str, str]
     ) -> ConfigFlowResult:
-        """Parāda formu, saglabājot jau ievadītās vērtības.
+        """Show the form, keeping whatever the user already typed.
 
-        Bez `data_schema` HA uzzīmē formu bez laukiem, un nākamais submit
-        atnāk kā tukšs dict - lietotājs iestrēgst.
+        Without `data_schema` HA renders a form with no fields at all, and the
+        next submit arrives as an empty dict - the user is stuck.
         """
         return self.async_show_form(
             step_id=step_id,
@@ -194,21 +194,22 @@ class NetvizConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             return await _probe(self._data), {}
         except SnmpConnectionError as err:
-            _LOGGER.debug("validācija neizdevās: %s", err)
+            _LOGGER.debug("validation failed: %s", err)
             return {}, {"base": "cannot_connect"}
         except Exception:  # noqa: BLE001
-            _LOGGER.exception("negaidīta kļūda validācijā")
+            _LOGGER.exception("unexpected error during validation")
             return {}, {"base": "unknown"}
 
     async def _create(self, info: dict[str, str | None]) -> ConfigFlowResult:
-        # Seriālnumurs ir stabils; adrese nav. Atkāpšanās uz host:port paliek
-        # tikai iekārtām, kas entPhysicalSerialNum neatbild.
+        # The serial number is stable; the address is not. Falling back to
+        # host:port is reserved for devices that do not answer
+        # entPhysicalSerialNum at all.
         serial = info.get("serial")
         unique = serial or f"{self._data[CONF_HOST]}:{self._data[CONF_PORT]}"
         if not serial:
             _LOGGER.warning(
-                "%s: seriālnumurs nav nolasāms, unique_id būs adrese - ja switch'a "
-                "adrese mainīsies, HA to uzskatīs par jaunu ierīci",
+                "%s: no serial number could be read, unique_id will be the address - "
+                "if the switch address changes, HA will treat it as a new device",
                 self._data[CONF_HOST],
             )
         await self.async_set_unique_id(unique)

@@ -1,4 +1,4 @@
-"""Sensoru platforma."""
+"""Sensor platform."""
 
 from __future__ import annotations
 
@@ -244,9 +244,11 @@ class NetvizSystemSensor(NetvizEntity, SensorEntity):
 
 
 class NetvizFaceplateSensor(NetvizEntity, SensorEntity):
-    """Nes faceplate ģeometriju atribūtos, lai kartei nav jāzina par failiem.
+    """Carries the faceplate geometry in its attributes, so the card needs to
+    know nothing about files.
 
-    Vērtība ir statiska, tāpēc recorder to saglabā vienreiz, nevis katrā ciklā.
+    The state itself is static, so the recorder stores it once rather than on
+    every poll cycle.
     """
 
     _attr_translation_key = "faceplate"

@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Notīra identificējošos datus no capture_fixture.py snapshot'a.
+"""Strips identifying data out of a capture_fixture.py snapshot.
 
-Neapstrādātais snapshot ir noderīgs, bet tajā ir tīkla iekšas: hostname,
-seriālnumuri, portu apraksti ar iekārtu nosaukumiem, VLAN nosaukumi. Repozitorijā
-iet tikai izvads no šī skripta; ievads paliek lokāli un ir .gitignore sarakstā.
+A raw snapshot is useful, but it holds the innards of a network: hostname,
+serial numbers, port descriptions naming real devices, VLAN names. Only the
+output of this script goes into the repository; the input stays local and is
+listed in .gitignore.
 
     python tools/sanitize_fixture.py tests/fixtures/jl357a-live.json \
                                      tests/fixtures/jl357a.json
 
-Ko saglabā apzināti:
-  * visu skaitlisko - skaitītājus, PoE milivatus, ātrumus, statusus, bitmapes
-  * `ifAlias` sākuma atstarpi, jo tā ir kļūda, ko tests pieķer
-  * `Not Avail` kā entPhysicalSerialNum vērtību, jo to atlases loģikai jāizfiltrē
-  * seriālnumuru ar beigu atstarpēm, jo arī tas jāapgriež
+Deliberately preserved:
+  * everything numeric - counters, PoE milliwatts, speeds, statuses, bitmaps
+  * the leading space in `ifAlias`, because that is the bug a test pins down
+  * `Not Avail` as an entPhysicalSerialNum value, because the selection logic
+    has to filter it out
+  * a serial number with trailing spaces, because that has to be stripped too
 """
 
 import argparse
@@ -28,31 +30,31 @@ OID_IF_DESCR = "1.3.6.1.2.1.2.2.1.2"
 OID_ENT_SERIAL = "1.3.6.1.2.1.47.1.1.1.1.11"
 OID_ENT_MODEL = "1.3.6.1.2.1.47.1.1.1.1.13"
 
-FAKE_HOST = "192.0.2.10"          # RFC 5737 dokumentācijas diapazons
+FAKE_HOST = "192.0.2.10"          # RFC 5737 documentation range
 FAKE_SYSNAME = "switch-test"
 FAKE_CHASSIS_SERIAL = "TESTSERIAL1"
-FAKE_MODULE_SERIAL = "TESTMODULE01    "   # atstarpes beigās - apzināti
+FAKE_MODULE_SERIAL = "TESTMODULE01    "   # trailing spaces on purpose
 FAKE_MODULE_MODEL = "TESTXCVR"
-KEEP_SERIALS = {"Not Avail"}      # ražotāja vietturis, nav identificējošs
+KEEP_SERIALS = {"Not Avail"}      # vendor placeholder, not identifying
 
 
 def sanitize(snap: dict) -> tuple[dict, list[str]]:
     log = []
-    out = json.loads(json.dumps(snap))  # dziļa kopija
+    out = json.loads(json.dumps(snap))  # deep copy
 
     if out.get("host"):
         log.append(f"host: {out['host']!r} -> {FAKE_HOST!r}")
         out["host"] = FAKE_HOST
 
-    # --- skalāri ---
+    # --- scalars ---
     if OID_SYS_NAME in out.get("get", {}):
         old = out["get"][OID_SYS_NAME]["value"]
         out["get"][OID_SYS_NAME]["value"] = FAKE_SYSNAME
         log.append(f"sysName: {old!r} -> {FAKE_SYSNAME!r}")
 
-    # sysDescr: modelis paliek, jo uz to balstās modeļa atpazīšana un
-    # sw_version parsēšanas tests. Bet būvēšanas ceļš un precīzais firmware
-    # līmenis ir konkrētās iekārtas pazīmes - formātu saglabājam, ciparus ne.
+    # sysDescr: the model stays, because model detection and the sw_version
+    # parsing test both rest on it. But the build path and the exact firmware
+    # level identify one specific unit - keep the shape, drop the digits.
     descr = out.get("get", {}).get(OID_SYS_DESCR, {}).get("value")
     if descr:
         new = descr.split(" (")[0]
@@ -70,7 +72,7 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
 
     walks = out.get("walks", {})
 
-    # --- seriālnumuru tabula ---
+    # --- serial number table ---
     serials = walks.get(OID_ENT_SERIAL, {})
     seen = 0
     for idx in sorted(serials, key=lambda k: int(k)):
@@ -82,9 +84,10 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
         log.append(f"entPhysicalSerialNum[{idx}]: {value!r} -> {new!r}")
         serials[idx] = new
 
-    # --- modeļu tabula: šasijas modelis paliek, moduļu modeļi ne ---
-    # Šasijas modelis ir tas, ko integrācija atpazīst, un tas ir pats produkts,
-    # ko atbalsta. Bet iespraustie SFP moduļi atklāj, kāds uplinks kur ir.
+    # --- model table: the chassis model stays, module models do not ---
+    # The chassis model is what the integration recognises, and it is the very
+    # product being supported. Plugged-in SFP modules, though, reveal which
+    # uplink runs where.
     models = walks.get(OID_ENT_MODEL, {})
     if models:
         chassis = next(
@@ -96,7 +99,7 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
                 log.append(f"entPhysicalModelName[{idx}]: {value!r} -> {FAKE_MODULE_MODEL!r}")
                 models[idx] = FAKE_MODULE_MODEL
 
-    # --- ifAlias: fiziskie porti, VLAN interfeisi, pārējie ---
+    # --- ifAlias: physical ports, VLAN interfaces, the rest ---
     names = walks.get(OID_IF_NAME, {})
     aliases = walks.get(OID_IF_ALIAS, {})
     scrubbed = 0
@@ -104,21 +107,21 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
         if not value.strip():
             continue
         name = names.get(idx, "")
-        lead = " " if value.startswith(" ") else ""   # kļūdas saglabāšana
+        lead = " " if value.startswith(" ") else ""   # preserve the bug
         if name.isdigit():
             new = f"{lead}device-{int(name):02d}"
         elif (m := re.fullmatch(r"VLAN(\d+)", name)):
             new = f"{lead}vlan-{m.group(1)}"
         elif name.startswith("lo"):
-            continue                                   # lo0..lo7 ir vispārīgi
+            continue                                   # lo0..lo7 are generic
         else:
             new = f"{lead}iface-{idx}"
         aliases[idx] = new
         scrubbed += 1
-    log.append(f"ifAlias: notīrītas {scrubbed} vērtības (sākuma atstarpe saglabāta)")
+    log.append(f"ifAlias: scrubbed {scrubbed} values (leading space preserved)")
 
-    # DEFAULT_VLAN ifName ir AOS-S noklusējums, pārējie VLANxx ir tikai numuri -
-    # tie paliek. ifDescr fiziskajiem portiem ir cipars, arī paliek.
+    # DEFAULT_VLAN as an ifName is the AOS-S default, and the other VLANxx are
+    # just numbers - those stay. ifDescr on a physical port is a digit, stays too.
     odd = [
         f"{idx}={value!r}"
         for idx, value in walks.get(OID_IF_DESCR, {}).items()
@@ -126,14 +129,14 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
         and not re.fullmatch(r"(DEFAULT_)?VLAN\d*", value)
     ]
     if odd:
-        log.append(f"UZMANĪBU, ifDescr neatpazītas vērtības: {odd[:5]}")
+        log.append(f"WARNING, unrecognised ifDescr values: {odd[:5]}")
 
     return out, log
 
 
 def audit(snap: dict) -> list[str]:
-    """Pēdējā pārbaude: vai palicis kas tāds, kas izskatās pēc privātas IP,
-    MAC adreses vai teksta, kas nav vispārīgs."""
+    """Final check: is anything left that looks like a private IP, a MAC
+    address, or text that is not generic."""
     blob = json.dumps(snap, ensure_ascii=False)
     problems = []
     for ip in set(re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", blob)):
@@ -143,9 +146,9 @@ def audit(snap: dict) -> list[str]:
         if octets[0] == 10 or (octets[0] == 192 and octets[1] == 168) or (
             octets[0] == 172 and 16 <= octets[1] <= 31
         ):
-            problems.append(f"privāta IP adrese: {ip}")
+            problems.append(f"private IP address: {ip}")
     for mac in set(re.findall(r"(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", blob)):
-        problems.append(f"MAC adrese: {mac}")
+        problems.append(f"MAC address: {mac}")
     return problems
 
 
@@ -164,7 +167,7 @@ def main() -> int:
 
     problems = audit(clean)
     if problems:
-        print("\nNEIZDEVĀS - palikuši identificējoši dati:", file=sys.stderr)
+        print("\nFAILED - identifying data remains:", file=sys.stderr)
         for p in problems:
             print(f"  {p}", file=sys.stderr)
         return 1
@@ -172,7 +175,7 @@ def main() -> int:
     with open(args.dest, "w", encoding="utf-8") as fh:
         json.dump(clean, fh, indent=1, sort_keys=True)
         fh.write("\n")
-    print(f"\naudits tīrs -> {args.dest}")
+    print(f"\naudit clean -> {args.dest}")
     return 0
 
 

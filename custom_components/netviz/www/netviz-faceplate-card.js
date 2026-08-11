@@ -1,28 +1,29 @@
 /**
  * netviz faceplate card
  *
- * Ģeometriju ņem no `sensor.<ierīce>_faceplate` atribūtiem, stāvokli - no pārējām
- * tās pašas ierīces entītijām. Portus savāc pēc `port` un `metric` atribūtiem,
- * NEVIS pēc entity_id nosaukuma, tāpēc pārsaukšana neko nesalauž.
+ * Takes its geometry from the `sensor.<device>_faceplate` attributes and the
+ * live state from the other entities of the same device. Ports are collected by
+ * their `port` and `metric` attributes, NOT by entity_id, so renaming an entity
+ * breaks nothing.
  *
  * Lovelace:
  *   type: custom:netviz-faceplate-card
- *   device: <device_id>          # vai:
+ *   device: <device_id>          # or:
  *   faceplate: sensor.sw_2540_faceplate
  *   title: SW-2540
  */
 
-// PoE indikators nedrīkst balstīties tikai uz toni: iepriekšējais #ff9f1c uz
-// 10/100M porta (#f2b632) bija praktiski neredzams. Dziļāks oranžs plus tumša
-// kontūra nolasās uz zaļa, dzintara, zila un pelēka vienādi labi.
+// The PoE indicator must not rely on hue alone: the previous #ff9f1c on a
+// 10/100M port (#f2b632) was all but invisible. A deeper orange plus a dark
+// outline reads equally well on green, amber, blue and grey.
 const POE_COLOR = "#ff6d00";
 const POE_OUTLINE = "rgba(0,0,0,0.75)";
-const POE_DOT_R = 2.6;      // stūrī, blakus numuram
-const POE_DOT_R_BIG = 4.5;  // centrā, kad numuri ir paslēpti un vieta ir brīva
+const POE_DOT_R = 2.6;      // in the corner, next to the number
+const POE_DOT_R_BIG = 4.5;  // centred, once the numbers are hidden and it is free
 
 const LABEL_FONT_SIZE = 8;
-// Zem šī izmēra pikseļos portu numuri ir tikai putra - tad tos slēpjam, un
-// paliek krāsas un tooltip. Tāpat dara switch'a paša web saskarne mazā izmērā.
+// Below this rendered size the port numbers are mush - hide them and keep the
+// colours and the tooltip. The switch's own web UI does the same when small.
 const LABEL_MIN_PX = 5.5;
 
 const LINK_COLORS = {
@@ -36,15 +37,15 @@ const LINK_COLORS = {
 };
 
 class NetvizFaceplateCard extends HTMLElement {
-  // Apzināti bez getConfigElement/getStubConfig: vizuālā redaktora šai kartei
-  // nav, un `hui-generic-entity-row` atgriešana ir rindas elements, nevis
-  // redaktors - tas salauza redaktoru, un stub konfigurācija ar tukšu
-  // `faceplate` uzreiz krita setConfig validācijā. Bez šīm metodēm HA korekti
-  // atkāpjas uz YAML redaktoru.
+  // Deliberately without getConfigElement/getStubConfig: this card has no
+  // visual editor, and returning `hui-generic-entity-row` hands back a row
+  // element rather than an editor - that broke the editor, and the stub config
+  // with an empty `faceplate` failed setConfig validation immediately. Without
+  // these methods HA falls back to the YAML editor, which is correct.
 
   setConfig(config) {
     if (!config.device && !config.faceplate) {
-      throw new Error("Norādi vai nu 'device', vai 'faceplate' entītiju");
+      throw new Error("Set either 'device' or a 'faceplate' entity");
     }
     this._config = config;
     this._built = false;
@@ -59,12 +60,12 @@ class NetvizFaceplateCard extends HTMLElement {
     this._hass = hass;
     const faceplate = this._findFaceplate();
     if (!faceplate) {
-      this._renderError("Faceplate entītija nav atrasta");
+      this._renderError("Faceplate entity not found");
       return;
     }
     const geometry = faceplate.attributes;
     if (!geometry.ports || !geometry.ports.length) {
-      this._renderError("Faceplate atribūtos nav portu");
+      this._renderError("No ports in the faceplate attributes");
       return;
     }
     if (!this._built || this._geometryId !== faceplate.entity_id) {
@@ -73,7 +74,7 @@ class NetvizFaceplateCard extends HTMLElement {
     this._update();
   }
 
-  /** Atrod faceplate entītiju pēc konfigurācijas vai pēc device_id. */
+  /** Finds the faceplate entity from the config, or by device_id. */
   _findFaceplate() {
     const hass = this._hass;
     if (this._config.faceplate) {
@@ -90,11 +91,12 @@ class NetvizFaceplateCard extends HTMLElement {
   }
 
   /**
-   * {porta_id: {metrika: entity_id}}, keširots.
+   * {port_id: {metric: entity_id}}, cached.
    *
-   * `set hass` HA izsauc pie JEBKURAS stāvokļa maiņas mājā, tāpēc pilns
-   * hass.entities skenējums katrā reizē ir dārgs - uz 48 portu switch'a tur ir
-   * 300+ mūsu entītiju plus viss pārējais. Reģistrs mainās reti, stāvokļi bieži.
+   * HA calls `set hass` on ANY state change in the house, so a full scan of
+   * hass.entities every time is expensive - on a 48 port switch that is 300+ of
+   * our own entities plus everything else. The registry changes rarely, the
+   * states change constantly.
    */
   _entityMap() {
     const hass = this._hass;
@@ -119,8 +121,8 @@ class NetvizFaceplateCard extends HTMLElement {
       if (!map[port]) map[port] = {};
       map[port][metric] = entry.entity_id;
     }
-    // Tukšu vai nepilnu karti nekešojam: startējot daļa stāvokļu vēl var nebūt
-    // ienākuši, un tad atribūtu pēc tiem nevar nolasīt.
+    // Never cache an empty or partial map: at startup some states may not have
+    // arrived yet, and then their attributes cannot be read.
     if (Object.keys(map).length >= expected && expected > 0) {
       this._mapSource = hass.entities;
       this._map = map;
@@ -128,7 +130,7 @@ class NetvizFaceplateCard extends HTMLElement {
     return map;
   }
 
-  /** Visas šīs ierīces netviz entītijas, sagrupētas pēc porta un metrikas. */
+  /** Every netviz entity of this device, grouped by port and metric. */
   _portStates() {
     const hass = this._hass;
     const grouped = {};
@@ -146,7 +148,7 @@ class NetvizFaceplateCard extends HTMLElement {
   _build(geometry, faceplateId) {
     this._faceplateId = faceplateId;
     this._geometryId = faceplateId;
-    this._map = null;        // cita ierīce vai cita ģeometrija - keša ārā
+    this._map = null;        // different device or geometry - drop the cache
     this._mapSource = null;
     const width = geometry.width || 800;
     const height = geometry.height || 100;
@@ -156,8 +158,8 @@ class NetvizFaceplateCard extends HTMLElement {
       card.header = this._config.title || geometry.display;
     }
 
-    // Pēc noklusējuma faceplate mērogojas pēc konteinera un ritjoslas nav.
-    // `min_width` ir izvēle tiem, kas grib pilnu izmēru un ritināšanu.
+    // By default the faceplate scales to its container and there is no
+    // scrollbar. `min_width` is there for anyone who wants full size and scroll.
     const minWidth = Number(this._config.min_width) || 0;
     const wrap = document.createElement("div");
     wrap.style.cssText =
@@ -199,8 +201,8 @@ class NetvizFaceplateCard extends HTMLElement {
       body.setAttribute("stroke-width", "1");
       group.appendChild(body);
 
-      // PoE indikators. Pozīciju un izmēru uzstāda _applyPoeDotLayout, jo tas
-      // atkarīgs no tā, vai numuri ir redzami.
+      // PoE indicator. Position and size are set by _applyPoeDotLayout, since
+      // both depend on whether the numbers are visible.
       let poeDot = null;
       if (port.poe) {
         poeDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -263,16 +265,16 @@ class NetvizFaceplateCard extends HTMLElement {
     card.appendChild(wrap);
     this.innerHTML = "";
     this.appendChild(card);
-    // Sākotnējā pozīcija, lai punkti nav bez koordinātām, ja ResizeObserver
-    // vēl nav nostrādājis vai to pārlūkā nav
+    // Initial position, so the dots are never left without coordinates if
+    // ResizeObserver has not fired yet or is missing from the browser
     this._applyPoeDotLayout(true);
     this._observeLabels(svg);
     this._built = true;
   }
 
   /**
-   * Portu numuri mērogojas kopā ar SVG, un šaurā kolonnā tie kļūst
-   * nesalasāmi. Tad tos labāk noņemt - krāsas un tooltip paliek.
+   * The port numbers scale with the SVG, and in a narrow column they turn
+   * illegible. Better to drop them - the colours and the tooltip remain.
    */
   _observeLabels(svg) {
     const apply = () => {
@@ -297,9 +299,10 @@ class NetvizFaceplateCard extends HTMLElement {
   }
 
   /**
-   * Kad numuri ir paslēpti, porta vidus ir brīvs - tad PoE punkts iet uz centru
-   * un kļūst lielāks. Mazā izmērā 2.6 vienību punkts stūrī izmērogotos uz
-   * pusotra pikseļa un pazustu tāpat kā iepriekš pazuda uz dzintara.
+   * With the numbers hidden the middle of the port is free, so the PoE dot moves
+   * to the centre and grows. At small sizes a 2.6 unit dot in the corner would
+   * scale down to about a pixel and a half and vanish, exactly as it used to
+   * vanish against amber.
    */
   _applyPoeDotLayout(labelsShown) {
     for (const node of Object.values(this._portNodes || {})) {
@@ -353,7 +356,7 @@ class NetvizFaceplateCard extends HTMLElement {
         if (!Number.isNaN(poe)) poeTotal += poe;
       }
 
-      const lines = [`Ports ${node.def.label}`];
+      const lines = [`Port ${node.def.label}`];
       if (link && link.attributes.description) {
         lines.push(link.attributes.description);
       }
@@ -373,11 +376,11 @@ class NetvizFaceplateCard extends HTMLElement {
 
     const total = Object.keys(this._portNodes).length;
     this._summary.textContent =
-      `${up}/${total} aktīvi` +
+      `${up}/${total} up` +
       (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "");
   }
 
-  /** Klikšķis uz porta atver link entītijas more-info dialogu. */
+  /** Clicking a port opens the more-info dialog of its link entity. */
   _openPort(portId) {
     const states = this._portStates()[portId];
     if (!states) return;
@@ -402,8 +405,8 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "netviz-faceplate-card",
   name: "netviz Faceplate",
-  description: "Switch priekšpanelis ar link, ātruma un PoE stāvokli",
+  description: "Switch faceplate with link, speed and PoE state",
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.2.3 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.3.0 ", "background:#2ea3f2;color:#fff", "");

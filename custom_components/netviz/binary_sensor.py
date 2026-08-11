@@ -1,4 +1,4 @@
-"""Binārie sensori - porta link stāvoklis."""
+"""Binary sensors - per-port link state."""
 
 from __future__ import annotations
 

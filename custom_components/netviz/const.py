@@ -1,4 +1,4 @@
-"""Konstantes."""
+"""Constants."""
 
 from __future__ import annotations
 
@@ -22,12 +22,12 @@ DEFAULT_SCAN_INTERVAL: Final = 30
 DEFAULT_TIMEOUT: Final = 4
 DEFAULT_RETRIES: Final = 2
 
-# Switch pārvaldības saskarnes shēma - tikai `configuration_url` vajadzībām.
-# AOS-S bieži nāk ar http un bez sertifikāta, tāpēc noklusējums nav https.
+# Scheme of the switch management interface - used for `configuration_url` only.
+# AOS-S usually ships with http and no certificate, so the default is not https.
 PROTOCOL_OPTIONS: Final = ["http", "https"]
 DEFAULT_PROTOCOL: Final = "http"
 
-# Metrikas, ko var ieslēgt uz portu. Noklusējums apzināti nav "viss".
+# Metrics that can be enabled per port. The default is deliberately not "all".
 METRIC_LINK: Final = "link"
 METRIC_SPEED: Final = "speed"
 METRIC_RX_RATE: Final = "rx_rate"
@@ -61,12 +61,13 @@ DEFAULT_METRICS: Final = [
     METRIC_POE_STATUS,
 ]
 
-# Metrikas, kas ir jēdzīgas tikai PoE portiem
+# Metrics that only make sense on PoE-capable ports
 POE_METRICS: Final = {METRIC_POE_POWER, METRIC_POE_STATUS}
 
-# SNMPv1 apzināti nav sarakstā: walk() lieto GETBULK, kas SNMPv1 neeksistē, un
-# v1 viens neeksistējošs OID atgriež noSuchName visam GET pieprasījumam. Uz
-# AOS-S v2c un v3 abi ir pieejami, tāpēc atsevišķs koda ceļš nav vērts.
+# SNMPv1 is deliberately absent: walk() uses GETBULK, which does not exist in
+# SNMPv1, and in v1 a single non-existent OID makes the whole GET return
+# noSuchName. AOS-S offers both v2c and v3, so a separate code path is not worth
+# the maintenance.
 SNMP_VERSIONS: Final = ["2c", "3"]
 AUTH_PROTOCOL_OPTIONS: Final = ["sha", "md5"]
 PRIV_PROTOCOL_OPTIONS: Final = ["aes", "aes192", "aes256", "des"]

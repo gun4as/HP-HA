@@ -1,9 +1,11 @@
-"""Noņem pilnu SNMP snapshot'u no īsta switch'a un saglabā kā testu fixture.
+"""Takes a full SNMP snapshot off a real switch and saves it as a test fixture.
 
-Tikai lasīšana. Ņem tieši tos OID, ko lieto snmp.py:poll() un probe(), un
-divus skaitītāju mērījumus ar pauzi, lai testējams arī rx_bps/tx_bps rēķins.
+Read-only. Fetches exactly the OIDs that snmp.py:poll() and probe() use, plus two
+counter samples with a pause between them, so the rx_bps/tx_bps maths is testable
+as well.
 
-Izvads NEIET repozitorijā - izlaid to caur tools/sanitize_fixture.py.
+The output does NOT belong in the repository - run it through
+tools/sanitize_fixture.py first.
 
     python capture_fixture.py 192.0.2.10 public tests/fixtures/jl357a-live.json
 """
@@ -25,7 +27,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
     get_cmd,
 )
 
-# tabulas, kuras poll() novalka; raw=True tām, kur vērtība ir bitmape
+# tables that poll() walks; raw=True for the ones whose value is a bitmap
 WALK_OIDS = {
     "1.3.6.1.2.1.2.2.1.2": ("ifDescr", False),
     "1.3.6.1.2.1.2.2.1.7": ("ifAdminStatus", False),
@@ -45,7 +47,7 @@ WALK_OIDS = {
     "1.3.6.1.2.1.17.7.1.4.5.1.1": ("dot1qPvid", False),
     "1.3.6.1.2.1.17.7.1.4.3.1.2": ("dot1qVlanStaticEgressPorts", True),
     "1.3.6.1.2.1.17.7.1.4.3.1.4": ("dot1qVlanStaticUntaggedPorts", True),
-    # tabulas, ko poll() nelieto, bet kas vajadzīgas seriālnumura labojumam
+    # tables poll() does not use, but which the serial number fix needs
     "1.3.6.1.2.1.47.1.1.1.1.11": ("entPhysicalSerialNum", False),
     "1.3.6.1.2.1.47.1.1.1.1.13": ("entPhysicalModelName", False),
 }
@@ -103,7 +105,7 @@ async def main(host, community, out_path, gap=8.0):
         snap["walks"][base] = await walk(engine, auth, target, base, raw)
         if raw:
             snap["walks_raw_b64"].append(base)
-        print(f"  {label:32} {len(snap['walks'][base]):>3} ierakstu")
+        print(f"  {label:32} {len(snap['walks'][base]):>3} rows")
 
     ei, es, _i, binds = await get_cmd(
         engine, auth, target, ContextData(),
@@ -118,20 +120,20 @@ async def main(host, community, out_path, gap=8.0):
             "type": cls,
         }
     print(f"  GET: {len(snap['get'])} OID, "
-          f"{sum(1 for v in snap['get'].values() if v['value'] is None)} tukši")
+          f"{sum(1 for v in snap['get'].values() if v['value'] is None)} empty")
 
-    print(f"\n  gaidu {gap:.0f}s otrajam skaitītāju mērījumam...")
+    print(f"\n  waiting {gap:.0f}s for the second counter sample...")
     await asyncio.sleep(gap)
     for base in COUNTERS:
         snap["counters_t1"][base] = await walk(engine, auth, target, base, False)
     snap["counter_gap_seconds"] = gap
 
-    # cik portiem skaitītāji tiešām pakustējās -> vai rate testam ir ko rēķināt
+    # how many ports actually moved -> whether the rate test has anything to chew on
     moved = 0
     for base in COUNTERS:
         t0, t1 = snap["walks"][base], snap["counters_t1"][base]
         moved += sum(1 for k in t0 if k in t1 and int(t1[k]) > int(t0[k]))
-    print(f"  skaitītāji pakustējās {moved} interfeisiem")
+    print(f"  counters moved on {moved} interfaces")
 
     path = Path(out_path)
     path.parent.mkdir(parents=True, exist_ok=True)

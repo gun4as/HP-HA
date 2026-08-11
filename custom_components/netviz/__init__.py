@@ -1,4 +1,4 @@
-"""netviz - pārvaldāmu switch'u vizualizācija Home Assistant."""
+"""netviz - managed network switch visualisation for Home Assistant."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 
 def _card_mtime(path: Path) -> int | None:
-    """Kartes faila mtime, vai None, ja faila nav. Blokējošs - izpildītājam."""
+    """mtime of the card file, or None if absent. Blocking - for the executor."""
     try:
         return path.stat().st_mtime_ns
     except OSError:
@@ -30,54 +30,55 @@ def _card_mtime(path: Path) -> int | None:
 
 
 async def _register_card(hass: HomeAssistant) -> None:
-    """Pasniedz faceplate karti no integrācijas mapes.
+    """Serve the faceplate card straight out of the integration directory.
 
-    Tā kartei nav jāiet caur HACS atsevišķi un lietotājam nav jāpievieno
-    resurss ar roku - kļūda, uz kuras uzkāpj puse custom karšu.
+    That way the card does not need its own HACS entry, and the user does not
+    have to add a Lovelace resource by hand - the step half of all custom cards
+    trip over.
     """
     if hass.data.get(f"{DOMAIN}_card_registered"):
         return
     path = Path(__file__).parent / "www" / CARD_FILENAME
-    # stat() un is_file() ir blokējoši izsaukumi - vienā gājumā izpildītājā
+    # stat() and is_file() both block - do it in one trip to the executor
     mtime = await hass.async_add_executor_job(_card_mtime, path)
     if mtime is None:
         _LOGGER.warning(
-            "kartes fails nav atrasts: %s - faceplate karte nebūs pieejama", path
+            "card file not found: %s - the faceplate card will be unavailable", path
         )
         return
     await hass.http.async_register_static_paths(
         [StaticPathConfig(CARD_URL, str(path), cache_headers=False)]
     )
-    # `frontend` ir manifest.json dependencies, tāpēc šeit tas jau ir ielādēts.
-    # Iepriekš bija after_dependencies un `if "frontend" in components` - ja tas
-    # nosacījums neizpildījās, fails bija pieejams, bet skripts panelī netika
-    # ievietots, un logā par to nebija nekā. Karte tad krita ar
-    # "Custom element doesn't exist".
+    # `frontend` is a manifest.json dependency, so it is already loaded here.
+    # It used to be an after_dependency guarded by `if "frontend" in components`
+    # - when that condition did not hold, the file was reachable but the script
+    # was never injected into the dashboard, with nothing in the log. The card
+    # then failed with "Custom element doesn't exist".
     try:
         from homeassistant.components.frontend import add_extra_js_url
 
         add_extra_js_url(hass, f"{CARD_URL}?v={mtime}")
     except Exception:  # noqa: BLE001
         _LOGGER.exception(
-            "kartes JS neizdevās pievienot frontend'am; failu var pievienot ar "
-            "roku Lovelace resursos kā %s",
+            "could not hand the card JS to the frontend; it can be added by hand "
+            "as a Lovelace resource pointing at %s",
             CARD_URL,
         )
         return
-    _LOGGER.info("faceplate karte reģistrēta: %s?v=%s", CARD_URL, mtime)
+    _LOGGER.info("faceplate card registered: %s?v=%s", CARD_URL, mtime)
     hass.data[f"{DOMAIN}_card_registered"] = True
 
 
 async def _reconcile_identity(
     hass: HomeAssistant, entry: NetvizConfigEntry, client: SnmpClient
 ) -> None:
-    """Pārliek unique_id no adreses uz seriālnumuru, ja tas vēl nav noticis.
+    """Move unique_id off the address and onto the serial number, if not done yet.
 
-    Līdz 0.2.0 seriālnumurs tika prasīts kā `entPhysicalSerialNum.1`, bet AOS-S
-    šasija ir indeksā 1001, tāpēc atbilde bija NoSuchInstance un unique_id
-    atkāpās uz host:port. Ierakstiem, kas izveidoti ar veco kodu, to var
-    izlabot klusi - tas ir daudz labāk, nekā likt dzēst integrāciju un
-    pievienot no jauna, zaudējot entītiju ID un vēsturi.
+    Up to 0.2.0 the serial was requested as `entPhysicalSerialNum.1`, but on
+    AOS-S the chassis sits at index 1001, so the answer was NoSuchInstance and
+    unique_id fell back to host:port. For entries created by that older code we
+    can fix this quietly, which beats asking the user to delete and re-add the
+    integration and lose their entity IDs and history.
     """
     if entry.data.get("serial"):
         return
@@ -87,21 +88,21 @@ async def _reconcile_identity(
         return
     if not (serial := info.get("serial")) or entry.unique_id == serial:
         return
-    # Ja kāds jau ir pievienojis to pašu switch'u otrreiz, divi ieraksti ar
-    # vienu unique_id nav pieļaujami - labāk atstājam kā ir un pasakām.
+    # If someone has already added the same switch twice, two entries cannot
+    # share one unique_id - leave it alone and say so.
     if any(
         other.unique_id == serial
         for other in hass.config_entries.async_entries(DOMAIN)
         if other.entry_id != entry.entry_id
     ):
         _LOGGER.warning(
-            "seriālnumurs %s jau pieder citam ierakstam, unique_id atstāts kā %s",
+            "serial number %s already belongs to another entry, unique_id left as %s",
             serial,
             entry.unique_id,
         )
         return
     _LOGGER.info(
-        "unique_id pārlikts no %s uz seriālnumuru %s", entry.unique_id, serial
+        "unique_id moved from %s to serial number %s", entry.unique_id, serial
     )
     hass.config_entries.async_update_entry(
         entry, unique_id=serial, data={**entry.data, "serial": serial}
@@ -110,11 +111,11 @@ async def _reconcile_identity(
 
 async def async_setup_entry(hass: HomeAssistant, entry: NetvizConfigEntry) -> bool:
     try:
-        # load_model atver failu - izpildītājā, citādi HA met brīdinājumu par
-        # blokējošu I/O event loop'ā
+        # load_model opens a file - to the executor, otherwise HA complains
+        # about blocking I/O in the event loop
         model = await hass.async_add_executor_job(load_model, entry.data[CONF_MODEL])
     except ModelNotFound as err:
-        _LOGGER.error("modelis nav atrasts: %s", err)
+        _LOGGER.error("model not found: %s", err)
         return False
 
     client = SnmpClient(_credentials(dict(entry.data)))
@@ -130,9 +131,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NetvizConfigEntry) -> bo
         client.close()
         raise ConfigEntryNotReady(f"{entry.data[CONF_HOST]}: {err}") from err
 
-    # Pirms platformu ielādes, lai entītijas uzreiz dabū pareizo serial_number.
-    # Un pirms update listener reģistrācijas, lai async_update_entry neizraisītu
-    # pārlādi tieši setup vidū.
+    # Before the platforms load, so entities pick up the right serial_number
+    # straight away. And before the update listener is registered, so that
+    # async_update_entry does not trigger a reload in the middle of setup.
     await _reconcile_identity(hass, entry, client)
 
     entry.runtime_data = coordinator
