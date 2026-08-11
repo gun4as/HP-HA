@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from homeassistant.const import CONF_HOST
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -11,25 +9,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import CONF_PROTOCOL, DEFAULT_PROTOCOL, DOMAIN
 from .coordinator import NetvizCoordinator
 
-# AOS-S sysDescr:
-#   Aruba JL357A 2540-48G-PoE+-4SFP+ Switch, revision YC.16.11.0029, ROM ... (...)
-# The `revision` field is the one we want. `split(",")[-1]` would pick up the ROM
-# version together with the build path, truncated mid-word.
-_RE_REVISION = re.compile(r"revision\s+([A-Za-z0-9._-]+)", re.IGNORECASE)
-_RE_VERSIONISH = re.compile(r"\b([A-Za-z]{0,3}\.?\d+\.\d+[.\d]*)\b")
-
-
-def sw_version_from_descr(descr: str | None) -> str | None:
-    """Firmware version from sysDescr, or None if the format is unrecognised."""
-    if not descr:
-        return None
-    if match := _RE_REVISION.search(descr):
-        return match.group(1).rstrip(".,")
-    # Different vendor or different format: take the first thing that looks like
-    # a version. None beats putting a model name or a file path on the device page.
-    if match := _RE_VERSIONISH.search(descr):
-        return match.group(1)
-    return None
+# The sysDescr parser lives in snmp.py: it is a pure function over SNMP data, and
+# that module is the one that can be imported and tested without Home Assistant.
+from .snmp import sw_version_from_descr
 
 
 class NetvizEntity(CoordinatorEntity[NetvizCoordinator]):

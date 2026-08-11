@@ -184,6 +184,22 @@ python3 custom_components/netviz/snmp.py 192.0.2.10 public
 
 ## Testing
 
+```bash
+pip install -r requirements_test.txt
+pytest
+```
+
+Nothing else is needed — no Home Assistant install, no network. `snmp.py` and
+`model.py` import no HA, and the tests load them straight from their files, so a
+real `SnmpClient` runs with only `walk()` and `get_many()` fed from a recorded
+snapshot. Everything above those two methods is the production code path.
+
+The snapshots come from a JL357A and a MikroTik RB2011, and the two devices
+disagree in useful ways: the RB2011 leaves the Q-BRIDGE egress table empty while
+filling `dot1qPvid`, and answers `entPhysicalSerialNum` with `rb400_usb` from a
+row whose `entPhysicalClass` is `unknown`. Both cases are pinned by tests,
+because both produced a wrong answer that looked like a right one.
+
 The tests never touch hardware — they run against a snapshot taken from a real
 switch and then scrubbed. Two steps, and the second one is mandatory:
 

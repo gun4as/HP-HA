@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 
 from pysnmp.hlapi.v3arch.asyncio import (
@@ -81,6 +82,12 @@ OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
 # index 1001, and the table also holds module and power supply rows, some of
 # which are empty or contain a vendor placeholder.
 OID_ENT_SERIAL_TABLE = "1.3.6.1.2.1.47.1.1.1.1.11"
+# ...and the class column, which is what makes the serial trustworthy. Picking
+# the lowest index instead works on AOS-S and fails on RouterOS, where an
+# unknown-class row answers "rb400_usb" - a component name that is identical on
+# every unit of that model, so two devices would collide on one unique_id.
+OID_ENT_CLASS = "1.3.6.1.2.1.47.1.1.1.1.5"
+ENT_CLASS_CHASSIS = 3
 # Values that are technically non-empty but are not a serial number
 SERIAL_PLACEHOLDERS = {"not avail", "not available", "none", "n/a", "unknown", "0"}
 OID_CPU = "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0"
@@ -137,6 +144,29 @@ def _auth_data(creds: SnmpCredentials):
     # GETBULK, which is v2c and later only, and a v1 GET containing one
     # non-existent OID returns noSuchName for the whole request, not per varbind.
     return CommunityData(creds.community, mpModel=1)
+
+
+# AOS-S sysDescr:
+#   Aruba JL357A 2540-48G-PoE+-4SFP+ Switch, revision YC.16.11.0029, ROM ... (...)
+# The `revision` field is the one we want. `split(",")[-1]` would pick up the ROM
+# version together with the build path, truncated mid-word. This lives here
+# rather than next to the entity because it is a pure sysDescr parser, and this
+# module is the one that can be imported and tested without Home Assistant.
+_RE_REVISION = re.compile(r"revision\s+([A-Za-z0-9._-]+)", re.IGNORECASE)
+_RE_VERSIONISH = re.compile(r"\b([A-Za-z]{0,3}\.?\d+\.\d+[.\d]*)\b")
+
+
+def sw_version_from_descr(descr: str | None) -> str | None:
+    """Firmware version from sysDescr, or None if the format is unrecognised."""
+    if not descr:
+        return None
+    if match := _RE_REVISION.search(descr):
+        return match.group(1).rstrip(".,")
+    # Different vendor or different format: take the first thing that looks like
+    # a version. None beats putting a model name or a file path on the device page.
+    if match := _RE_VERSIONISH.search(descr):
+        return match.group(1)
+    return None
 
 
 def _numeric(oid) -> str:
@@ -251,20 +281,36 @@ class SnmpClient:
     # ------------------------------------------------------------ higher level
 
     async def _serial(self) -> str | None:
-        """Chassis serial number from entPhysicalSerialNum.
+        """Chassis serial number from ENTITY-MIB.
 
-        Takes the first usable value in ascending index order, because in
-        ENTITY-MIB the chassis always precedes the modules plugged into it.
-        Skips empty values, vendor placeholders, and pads away the stray
-        whitespace that module serial numbers tend to carry.
+        Asks the device which row is the chassis rather than guessing. Where
+        entPhysicalClass is missing, falls back to ascending index order, since
+        the chassis precedes the modules plugged into it. Empty values, vendor
+        placeholders and the stray whitespace module serials carry are all
+        dropped; if nothing usable is left the answer is None, which is honest.
         """
         try:
-            table = await self.walk(OID_ENT_SERIAL_TABLE)
+            serials = await self.walk(OID_ENT_SERIAL_TABLE)
         except SnmpConnectionError:
             _LOGGER.debug("entPhysicalSerialNum is not available", exc_info=True)
             return None
-        for index in sorted(table, key=lambda k: [int(p) for p in k.split(".")]):
-            value = str(table[index]).strip()
+        if not serials:
+            return None
+        try:
+            classes = await self.walk(OID_ENT_CLASS)
+        except SnmpConnectionError:
+            classes = {}
+
+        if classes:
+            candidates = [
+                index for index, value in classes.items()
+                if _as_int(value) == ENT_CLASS_CHASSIS
+            ]
+        else:
+            candidates = list(serials)
+
+        for index in sorted(candidates, key=lambda k: [int(p) for p in k.split(".")]):
+            value = str(serials.get(index, "")).strip()
             if value and value.lower() not in SERIAL_PLACEHOLDERS:
                 return value
         return None
@@ -418,13 +464,17 @@ class SnmpClient:
 
                 vinfo = vlan_map.get(ifindex)
                 if vinfo:
-                    port["pvid"] = vinfo.get("pvid")
-                    port["vlans"] = vinfo.get("vlans", [])
-                    tagged = [
-                        v for v in vinfo.get("vlans", [])
-                        if v not in vinfo.get("untagged", [])
-                    ]
-                    port["mode"] = "trunk" if tagged else "access"
+                    if vinfo.get("pvid") is not None:
+                        port["pvid"] = vinfo["pvid"]
+                    # RouterOS fills dot1qPvid but leaves the static egress table
+                    # empty. With no membership data there is no evidence for
+                    # access versus trunk, and defaulting to `access` would label
+                    # a trunk carrying every VLAN as an access port - a wrong
+                    # answer that looks like a real one. Say nothing instead.
+                    if vlans := vinfo.get("vlans"):
+                        port["vlans"] = vlans
+                        tagged = [v for v in vlans if v not in vinfo.get("untagged", [])]
+                        port["mode"] = "trunk" if tagged else "access"
 
                 out_ports[pid] = port
 

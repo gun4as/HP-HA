@@ -1,0 +1,238 @@
+"""The SNMP layer, against snapshots of two real devices.
+
+Every expectation here was checked against the hardware first - the PoE figures
+against the switch's own web UI, the VLAN decoding against its VLAN table - so a
+failure means the code drifted, not that the fixture is a guess.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from conftest import FixtureClient, snmp
+
+# --------------------------------------------------------------- pure functions
+
+
+def test_portlist_decodes_the_bitmap_msb_first():
+    # bit 0 of byte 0 is port 1, so 0b10000001 is ports 1 and 8
+    assert snmp._portlist(bytes([0b10000001])) == {1, 8}
+    assert snmp._portlist(bytes([0x00, 0b01000000])) == {10}
+    assert snmp._portlist(b"") == set()
+
+
+def test_as_int_falls_back_instead_of_raising():
+    assert snmp._as_int("42") == 42
+    assert snmp._as_int(None) is None
+    assert snmp._as_int("no such object", default=-1) == -1
+
+
+@pytest.mark.parametrize(
+    ("descr", "expected"),
+    [
+        # the real thing: the ROM field and the build path come after the one we want
+        (
+            "Aruba JL357A 2540-48G-PoE+-4SFP+ Switch, revision YC.16.11.0029, "
+            "ROM YC.16.01.0003 (/ws/swbuildm/rel_beluru/code/build/cpm(x))",
+            "YC.16.11.0029",
+        ),
+        ("RouterOS RB2011UiAS-2HnD", None),
+        ("Some Switch v3.14.15 build 9", "v3.14.15"),  # vendor prefix kept as written
+        ("", None),
+        (None, None),
+    ],
+)
+def test_sw_version_comes_from_the_revision_field(descr, expected):
+    assert snmp.sw_version_from_descr(descr) == expected
+
+
+# ------------------------------------------------------------------ serial number
+
+
+async def test_serial_prefers_the_chassis_over_a_module(aruba):
+    """The chassis is index 1001 and a transceiver is 27052; lowest index wins."""
+    client = FixtureClient(aruba)
+    assert await client._serial() == "TESTSERIAL1"
+
+
+async def test_serial_strips_and_skips_placeholders(aruba):
+    table = aruba.walk(snmp.OID_ENT_SERIAL_TABLE)
+    assert "Not Avail" in table.values(), "fixture lost its placeholder row"
+    assert any(v != v.strip() for v in table.values()), "fixture lost its padded row"
+    assert await FixtureClient(aruba)._serial() == "TESTSERIAL1"
+
+
+async def test_serial_rejects_a_component_name(rb2011):
+    """RB2011 answers entPhysicalSerialNum with 'rb400_usb'.
+
+    That is a component name, identical on every RB2011 ever made. Accepting it
+    would give two different devices the same unique_id, and the second one
+    could never be added.
+    """
+    table = rb2011.walk(snmp.OID_ENT_SERIAL_TABLE)
+    assert [v for v in table.values() if v.strip()] == ["rb400_usb"]
+    assert await FixtureClient(rb2011)._serial() is None
+
+
+# -------------------------------------------------------------------------- poll
+
+
+async def test_every_model_port_matches(aruba):
+    ports = _aruba_ports()
+    data = await FixtureClient(aruba).poll(ports)
+    assert len(data["ports"]) == 52
+    assert data["system"]["ports_total"] == 52
+
+
+async def test_ports_up_matches_ifoperstatus(aruba):
+    oper = aruba.walk(snmp.OID_IF_OPER)
+    names = aruba.walk(snmp.OID_IF_NAME)
+    expected = sum(
+        1 for idx, state in oper.items()
+        if state == "1" and names.get(idx, "").strip().isdigit()
+        and 1 <= int(names[idx]) <= 52
+    )
+    data = await FixtureClient(aruba).poll(_aruba_ports())
+    assert data["system"]["ports_up"] == expected
+
+
+async def test_poe_power_is_milliwatts_divided_by_a_thousand(aruba):
+    """The HP MIB reports mW. Getting this wrong is a factor of 1000."""
+    milliwatts = aruba.walk(snmp.OID_HP_POE_MW)
+    data = await FixtureClient(aruba).poll(_aruba_ports())
+
+    live = {p: int(v) for p, v in milliwatts.items() if int(v) > 0}
+    assert live, "fixture has no PoE load, this test would prove nothing"
+
+    for poe_index, mw in live.items():
+        port_id = poe_index.split(".")[1]
+        assert data["ports"][port_id]["poe_power"] == round(mw / 1000, 1)
+        assert data["ports"][port_id]["poe_status"] == "delivering"
+
+    drawing = {p for p, v in data["ports"].items() if (v.get("poe_power") or 0) > 0}
+    assert drawing == {i.split(".")[1] for i in live}
+
+
+async def test_alias_has_no_leading_space(aruba):
+    """AOS-S returns ifAlias exactly as configured, spaces and all."""
+    raw = aruba.walk(snmp.OID_IF_ALIAS)
+    assert any(v.startswith(" ") for v in raw.values()), "fixture lost the quirk"
+
+    data = await FixtureClient(aruba).poll(_aruba_ports())
+    aliases = [p["alias"] for p in data["ports"].values() if p["alias"]]
+    assert aliases, "no port descriptions in the fixture"
+    assert all(a == a.strip() for a in aliases)
+
+
+async def test_vlan_membership_and_mode(aruba):
+    """Checked against the switch's own VLAN table, all sixteen columns."""
+    data = await FixtureClient(aruba).poll(_aruba_ports())
+    port1 = data["ports"]["1"]
+    assert port1["pvid"] == 20
+    assert port1["vlans"] == [20, 50]
+    assert port1["mode"] == "trunk"       # untagged in 20, tagged in 50
+
+    port15 = data["ports"]["15"]
+    assert port15["vlans"] == [30]
+    assert port15["mode"] == "access"
+
+    port47 = data["ports"]["47"]
+    assert port47["pvid"] == 1            # PVID pointing at a VLAN it is not in
+    assert port47["vlans"] == [100]
+    assert port47["mode"] == "trunk"
+
+
+async def test_vlans_can_be_skipped(aruba):
+    data = await FixtureClient(aruba).poll(_aruba_ports(), with_vlans=False)
+    assert all("pvid" not in p for p in data["ports"].values())
+
+
+async def test_rates_need_two_samples(aruba):
+    client = FixtureClient(aruba)
+    first = await client.poll(_aruba_ports())
+    assert all(p["rx_bps"] is None for p in first["ports"].values())
+
+    client.advance(aruba.gap)
+    second = await client.poll(_aruba_ports())
+
+    t0 = aruba.walk(snmp.OID_IF_HCIN)
+    t1 = aruba.walk(snmp.OID_IF_HCIN, second=True)
+    moved = [k for k in t0 if k in t1 and int(t1[k]) > int(t0[k])]
+    assert moved, "counters did not move in the fixture"
+
+    checked = 0
+    for port in second["ports"].values():
+        key = str(port["ifindex"])
+        if key not in moved:
+            continue
+        expected = (int(t1[key]) - int(t0[key])) * 8 / aruba.gap
+        assert port["rx_bps"] == pytest.approx(expected, rel=1e-3)
+        checked += 1
+    assert checked, "no model port had a moving counter"
+
+
+async def test_counter_going_backwards_yields_no_rate(aruba):
+    """A reboot or a wrap must not produce a negative or absurd rate."""
+    client = FixtureClient(aruba)
+    await client.poll(_aruba_ports())
+    for ifindex in list(client._prev.counters):
+        rx, tx = client._prev.counters[ifindex]
+        client._prev.counters[ifindex] = (rx + 10**12, tx + 10**12)
+    client.advance(aruba.gap)
+    data = await client.poll(_aruba_ports())
+    assert all(p["rx_bps"] is None for p in data["ports"].values())
+
+
+async def test_unmatched_ports_are_reported(aruba, caplog):
+    """Silently losing every port is the worst failure mode this thing has."""
+    ports = _aruba_ports() + [{"id": "99", "ifname": "does-not-exist"}]
+    with caplog.at_level(logging.WARNING):
+        data = await FixtureClient(aruba).poll(ports)
+    assert "99" not in data["ports"]
+    assert "did not match" in caplog.text
+    assert "'99'" in caplog.text
+
+
+async def test_system_values(aruba):
+    data = await FixtureClient(aruba).poll(_aruba_ports())
+    system = data["system"]
+    assert system["poe_budget"] == 370
+    assert system["poe_used"] > 0
+    assert system["cpu"] is not None
+    assert system["uptime"] > 0        # sysUpTime is centiseconds, we store seconds
+
+
+# ------------------------------------------------------- the other vendor's shape
+
+
+async def test_routeros_ports_are_found_by_iftype(rb2011):
+    ports = rb2011.physical_ports()
+    assert len(ports) == 11
+    data = await FixtureClient(rb2011).poll(ports)
+    assert len(data["ports"]) == 11
+
+
+async def test_routeros_reports_no_vlan_mode_without_egress(rb2011):
+    """RouterOS fills dot1qPvid but leaves dot1qVlanStaticEgressPorts empty.
+
+    With no egress data there is no evidence for access versus trunk, and a
+    trunk port carrying every VLAN would be labelled `access` - a wrong answer
+    dressed as a real one. Report the PVID, say nothing about the mode.
+    """
+    assert rb2011.walk(snmp.OID_VLAN_EGRESS) == {}
+    assert rb2011.walk(snmp.OID_DOT1Q_PVID), "fixture lost its PVID table"
+
+    data = await FixtureClient(rb2011).poll(rb2011.physical_ports())
+    with_pvid = [p for p in data["ports"].values() if p.get("pvid") is not None]
+    assert with_pvid, "no port picked up a PVID"
+    assert all("mode" not in p for p in data["ports"].values())
+    assert all(p.get("vlans", []) == [] for p in data["ports"].values())
+
+
+def _aruba_ports() -> list[dict]:
+    """The JL357A model, as the integration loads it."""
+    from conftest import model
+
+    return [dict(p) for p in model.load_model("jl357a")["ports"]]

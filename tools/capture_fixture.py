@@ -30,6 +30,9 @@ from pysnmp.hlapi.v3arch.asyncio import (
 # tables that poll() walks; raw=True for the ones whose value is a bitmap
 WALK_OIDS = {
     "1.3.6.1.2.1.2.2.1.2": ("ifDescr", False),
+    # ifType is how physical ports are found without trusting ifName: 6 is
+    # ethernetCsmacd everywhere, while ifName is whatever the admin typed
+    "1.3.6.1.2.1.2.2.1.3": ("ifType", False),
     "1.3.6.1.2.1.2.2.1.7": ("ifAdminStatus", False),
     "1.3.6.1.2.1.2.2.1.8": ("ifOperStatus", False),
     "1.3.6.1.2.1.31.1.1.1.1": ("ifName", False),
@@ -48,14 +51,34 @@ WALK_OIDS = {
     "1.3.6.1.2.1.17.7.1.4.3.1.2": ("dot1qVlanStaticEgressPorts", True),
     "1.3.6.1.2.1.17.7.1.4.3.1.4": ("dot1qVlanStaticUntaggedPorts", True),
     # tables poll() does not use, but which the serial number fix needs
+    # entPhysicalClass is what makes the serial trustworthy: the device says
+    # which row is the chassis, instead of us guessing by index order
+    "1.3.6.1.2.1.47.1.1.1.1.5": ("entPhysicalClass", False),
     "1.3.6.1.2.1.47.1.1.1.1.11": ("entPhysicalSerialNum", False),
     "1.3.6.1.2.1.47.1.1.1.1.13": ("entPhysicalModelName", False),
+    # --- other vendors, for the profile work ---
+    # These come back empty on AOS-S and populated on RouterOS, or the other way
+    # round. Capturing both means one snapshot documents what a vendor does NOT
+    # answer, which is exactly what the profile has to encode.
+    "1.3.6.1.4.1.14988.1.1.15.1.1.2": ("mtxrPOEName", False),
+    "1.3.6.1.4.1.14988.1.1.15.1.1.3": ("mtxrPOEStatus", False),
+    "1.3.6.1.4.1.14988.1.1.15.1.1.4": ("mtxrPOEVoltage", False),
+    "1.3.6.1.4.1.14988.1.1.15.1.1.5": ("mtxrPOECurrent", False),
+    "1.3.6.1.4.1.14988.1.1.15.1.1.6": ("mtxrPOEPower", False),
+    "1.3.6.1.2.1.25.3.3.1.2": ("hrProcessorLoad", False),
+    "1.3.6.1.2.1.25.2.3.1.3": ("hrStorageDescr", False),
+    "1.3.6.1.2.1.25.2.3.1.5": ("hrStorageSize", False),
+    "1.3.6.1.2.1.25.2.3.1.6": ("hrStorageUsed", False),
+    "1.3.6.1.2.1.25.2.3.1.4": ("hrStorageAllocationUnits", False),
 }
 
 GET_OIDS = {
     "1.3.6.1.2.1.1.1.0": "sysDescr",
+    "1.3.6.1.2.1.1.2.0": "sysObjectID",
     "1.3.6.1.2.1.1.3.0": "sysUpTime",
     "1.3.6.1.2.1.1.5.0": "sysName",
+    "1.3.6.1.4.1.14988.1.1.7.3.0": "mtxrSerialNumber",
+    "1.3.6.1.4.1.14988.1.1.7.4.0": "mtxrFirmwareVersion",
     "1.3.6.1.2.1.47.1.1.1.1.11.1": "entPhysicalSerialNum.1",
     "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0": "hpSwitchCpuStat",
     "1.3.6.1.4.1.11.2.14.11.5.1.1.2.1.1.1.6.1": "hpLocalMemFreeBytes",
