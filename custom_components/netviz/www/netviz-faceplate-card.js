@@ -12,6 +12,11 @@
  *   title: SW-2540
  */
 
+const LABEL_FONT_SIZE = 8;
+// Zem šī izmēra pikseļos portu numuri ir tikai putra - tad tos slēpjam, un
+// paliek krāsas un tooltip. Tāpat dara switch'a paša web saskarne mazā izmērā.
+const LABEL_MIN_PX = 5.5;
+
 const LINK_COLORS = {
   down: "var(--disabled-color, #6f7378)",
   10: "#f2b632",
@@ -143,13 +148,21 @@ class NetvizFaceplateCard extends HTMLElement {
       card.header = this._config.title || geometry.display;
     }
 
+    // Pēc noklusējuma faceplate mērogojas pēc konteinera un ritjoslas nav.
+    // `min_width` ir izvēle tiem, kas grib pilnu izmēru un ritināšanu.
+    const minWidth = Number(this._config.min_width) || 0;
     const wrap = document.createElement("div");
-    wrap.style.cssText = "padding:12px 16px 16px;overflow-x:auto";
+    wrap.style.cssText =
+      "padding:12px 16px 16px" + (minWidth ? ";overflow-x:auto" : "");
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", geometry.viewbox || `0 0 ${width} ${height}`);
-    svg.setAttribute("width", "100%");
-    svg.style.cssText = `min-width:${Math.round(width * 0.75)}px;display:block`;
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.style.cssText =
+      "width:100%;height:auto;display:block" +
+      (minWidth ? `;min-width:${minWidth}px` : "");
+    this._viewBoxWidth = width;
+    this._labels = [];
 
     const chassis = document.createElementNS("http://www.w3.org/2000/svg", "rect");
     chassis.setAttribute("x", "4");
@@ -193,11 +206,12 @@ class NetvizFaceplateCard extends HTMLElement {
       label.setAttribute("x", Number(port.x) + Number(port.w) / 2);
       label.setAttribute("y", Number(port.y) + Number(port.h) / 2 + 3);
       label.setAttribute("text-anchor", "middle");
-      label.setAttribute("font-size", "8");
+      label.setAttribute("font-size", String(LABEL_FONT_SIZE));
       label.setAttribute("fill", "var(--primary-text-color, #eee)");
       label.setAttribute("pointer-events", "none");
       label.textContent = port.label;
       group.appendChild(label);
+      this._labels.push(label);
 
       const tooltip = document.createElementNS("http://www.w3.org/2000/svg", "title");
       group.appendChild(tooltip);
@@ -236,7 +250,40 @@ class NetvizFaceplateCard extends HTMLElement {
     card.appendChild(wrap);
     this.innerHTML = "";
     this.appendChild(card);
+    this._observeLabels(svg);
     this._built = true;
+  }
+
+  /**
+   * Portu numuri mērogojas kopā ar SVG, un šaurā kolonnā tie kļūst
+   * nesalasāmi. Tad tos labāk noņemt - krāsas un tooltip paliek.
+   */
+  _observeLabels(svg) {
+    const apply = () => {
+      const rendered = svg.clientWidth || svg.getBoundingClientRect().width;
+      if (!rendered || !this._viewBoxWidth) return;
+      const px = (LABEL_FONT_SIZE * rendered) / this._viewBoxWidth;
+      const show = px >= LABEL_MIN_PX;
+      if (show === this._labelsShown) return;
+      this._labelsShown = show;
+      for (const label of this._labels) {
+        label.style.display = show ? "" : "none";
+      }
+    };
+    this._labelsShown = undefined;
+    if (this._resizeObserver) this._resizeObserver.disconnect();
+    if (typeof ResizeObserver === "function") {
+      this._resizeObserver = new ResizeObserver(apply);
+      this._resizeObserver.observe(svg);
+    }
+    apply();
+  }
+
+  disconnectedCallback() {
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
+    }
   }
 
   _update() {
@@ -321,4 +368,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.2.0 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.2.2 ", "background:#2ea3f2;color:#fff", "");

@@ -96,6 +96,28 @@ type: custom:netviz-faceplate-card
 faceplate: sensor.sw_2540_faceplate
 ```
 
+Priekšpanelis ir garš un zems — uz JL357A proporcija ir gandrīz 9:1. Kartei
+vajag platumu, citādi porti kļūst niecīgi. Sadaļu panelī (`sections`) dod tam
+pilnu rindu:
+
+```yaml
+type: custom:netviz-faceplate-card
+faceplate: sensor.sw_2540_faceplate
+grid_options:
+  columns: full
+```
+
+Karte mērogojas pēc konteinera un ritjoslas nav. Portu numuri tiek paslēpti, ja
+tie sanāktu mazāki par ~5,5px — zem ~615px platuma uz 52 portu korpusa. Krāsas
+un tooltip paliek. Ja gribi pilnu izmēru ar horizontālo ritināšanu, uzstādi
+`min_width`:
+
+```yaml
+type: custom:netviz-faceplate-card
+faceplate: sensor.sw_2540_faceplate
+min_width: 820
+```
+
 Karte ņem ģeometriju no `faceplate` entītijas atribūtiem un stāvokli no pārējām
 tās pašas ierīces entītijām. Portus tā savāc pēc `port` un `metric` atribūtiem,
 **nevis** pēc entity_id — pārsaukšana neko nesalauž.
