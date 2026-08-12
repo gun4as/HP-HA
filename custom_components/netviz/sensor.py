@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -20,6 +21,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -46,6 +48,47 @@ from .model import (
     template_geometry,
     with_radios,
 )
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _undo_our_own_disable(
+    hass: HomeAssistant, coordinator: NetvizCoordinator
+) -> None:
+    """Re-enable a radio sensor this integration itself disabled.
+
+    Radio sensors shipped disabled by default in an earlier version, because back
+    then the only device reporting any was a controller listing somebody else's
+    radios. `entity_registry_enabled_default` applies once, when the entity is
+    created, so changing that default left every already-created one hidden - on
+    exactly the access points whose radios are the interesting half. The card then
+    drew a block with no entity behind it and no reload could help, because HA
+    never re-enables an entity on its own.
+
+    Only a disable recorded as the integration's own is cleared. One the user made
+    is theirs, and stays. Done before the entities are added, so the platform sees
+    the cleared flag and adds them in the same pass.
+    """
+    registry = er.async_get(hass)
+    entry_id = coordinator.config_entry.entry_id
+    for ifindex, radio in coordinator.wireless.get("radios", {}).items():
+        if not radio.get("local"):
+            continue
+        entity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry_id}_wifi_radio_{ifindex}"
+        )
+        if entity_id is None:
+            continue
+        existing = registry.async_get(entity_id)
+        if existing is None or existing.disabled_by is not er.RegistryEntryDisabler.INTEGRATION:
+            continue
+        _LOGGER.info(
+            "%s: re-enabling %s, which an earlier version of netviz disabled",
+            coordinator.config_entry.title,
+            entity_id,
+        )
+        registry.async_update_entity(entity_id, disabled_by=None)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -203,9 +246,10 @@ async def async_setup_entry(
     ]
     entities.append(NetvizFaceplateSensor(coordinator))
 
-    # Wireless only exists on a CAPsMAN controller. Anything else returns an
+    # Wireless only exists where a device reports any. Anything else returns an
     # empty aggregate and gets no entities rather than a row of zeroes.
     if wireless := coordinator.wireless:
+        _undo_our_own_disable(hass, coordinator)
         entities.append(
             NetvizSystemSensor(coordinator, WIRELESS_CLIENTS_SENSOR)
         )

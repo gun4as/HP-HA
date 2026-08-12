@@ -213,6 +213,13 @@ The card takes its geometry from the `faceplate` entity attributes and the live
 state from the other entities of the same device. It collects ports by their
 `port` and `metric` attributes, **not** by entity_id — renaming breaks nothing.
 
+A hollow block with a dashed outline means there is no entity behind it, which is
+a different thing from a radio that is switched off. Radio sensors shipped
+disabled by default in an early version, and Home Assistant applies that flag
+only when an entity is created, so upgrading left them hidden; netviz now clears
+that flag on load where it set it itself, and leaves alone any entity the user
+disabled.
+
 Radios appear on the faceplate too, as rounded blocks after the ports, labelled
 by band — `2.4G`, `5G`. Green means clients are attached, dark green means up and
 idle, blue means a controller manages the radio and this device cannot count its
