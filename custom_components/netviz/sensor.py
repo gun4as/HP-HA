@@ -366,6 +366,10 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
             "quality",
             "band",
             "frequency",
+            # RouterOS states a channel as frequency/width/protocol(power); kept
+            # whole, because the width and the protocol are worth having and are
+            # not worth pretending to parse into separate claims.
+            "channel",
             "up",
             "managed",
         ):

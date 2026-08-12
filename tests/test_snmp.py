@@ -669,6 +669,42 @@ async def test_a_network_with_nobody_on_it_is_still_a_network(capsman_provisione
     assert counted == data["wireless"]["clients"]
 
 
+async def test_a_capsman_interface_carries_its_ssid_and_channel(capsman_provisioned):
+    """`24Ghz-<ap>-1-2` says nothing to anybody; `IOT` does.
+
+    The SSID comes from the clients on that interface - every one observed served
+    exactly a single SSID. The channel comes from the controller's own column, and
+    is populated on the master interface of a radio and empty on the virtual APs
+    hanging off it. Those are on the same radio and so the same channel, but the
+    only thing linking them is the operator's naming, and ifStackTable is empty on
+    RouterOS - so the frequency stays where the device put it.
+    """
+    data = await FixtureClient(capsman_provisioned).poll(
+        capsman_provisioned.physical_ports()
+    )
+    radios = data["wireless"]["radios"]
+
+    named = [r for r in radios.values() if r.get("ssid")]
+    assert named, "an interface with clients should carry the SSID they are on"
+    assert all((r["clients"] or 0) > 0 for r in named), (
+        "an SSID can only be known from a client, so a quiet interface has none"
+    )
+
+    tuned = [r for r in radios.values() if r.get("channel")]
+    assert tuned, "the master interface of each radio reports its channel"
+    for radio in tuned:
+        assert radio["band"] in ("2.4G", "5G", "6G")
+        assert 2000 < radio["frequency"] < 8000, "in MHz, from the channel string"
+
+
+def test_a_channel_string_yields_only_its_frequency():
+    assert snmp._channel_frequency("2437/20-Ce/gn(20dBm)") == 2437
+    assert snmp._channel_frequency("5180/20-Ceee/ac/P(23dBm)") == 5180
+    assert snmp._channel_frequency("") is None
+    assert snmp._channel_frequency(None) is None
+    assert snmp._channel_frequency("auto") is None
+
+
 async def test_an_interface_that_is_not_serving_is_left_out(capsman_provisioned):
     """The table also holds interfaces in other states.
 

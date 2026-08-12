@@ -449,6 +449,16 @@ about nothing. Registrations still win where they exist, since they are per-clie
 and carry signal strength; the table is the floor that makes an empty network
 visible.
 
+Each interface also carries the SSID of the clients on it — every one observed
+served exactly a single SSID, and a mixed one would be left unnamed rather than
+represented by whichever name won — and, on the master interface of a radio, the
+channel the controller assigned: `2437/20-Ce/gn(20dBm)`, kept whole as an
+attribute with the frequency and band read off the front of it. The virtual APs
+hanging off that radio are on the same channel, but `ifStackTable` is empty on
+RouterOS and the only thing linking them to their master is the operator's naming,
+so the frequency is left where the device reports it rather than copied along a
+convention.
+
 One thing SNMP will not give: the *name* of an SSID nobody is on. The SSID appears
 only in the registration table, per client, so an empty network is identifiable by
 its interface — `24Ghz-<ap>-1-1` — and not by the SSID it is broadcasting.

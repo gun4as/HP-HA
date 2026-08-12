@@ -211,6 +211,20 @@ def _burned_in(raw) -> bool | None:
     return not int(digits[:2], 16) & 0x02
 
 
+# RouterOS states a channel as frequency/width-extensions/protocol(power), e.g.
+# "2437/20-Ce/gn(20dBm)". Only the leading frequency is wanted; the rest is kept
+# verbatim as an attribute rather than picked apart into claims.
+_RE_CHANNEL_FREQ = re.compile(r"^\s*(\d{3,5})")
+
+
+def _channel_frequency(raw) -> int | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    match = _RE_CHANNEL_FREQ.match(text)
+    return int(match.group(1)) if match else None
+
+
 def _band_of(frequency: int | None) -> str | None:
     """A short band label from a channel frequency in MHz."""
     if frequency is None:
@@ -553,10 +567,12 @@ class SnmpClient:
 
         by_ssid: dict[str, dict] = {}
         by_radio: dict[str, dict] = {}
+        ssid_per_radio: dict[str, set[str]] = {}
         for index, raw_ssid in registrations.items():
             ssid = str(raw_ssid).strip() or "(hidden)"
             # index is the client MAC followed by the interface it is on
             ifindex = index.split(".")[-1]
+            ssid_per_radio.setdefault(ifindex, set()).add(ssid)
             signal = _as_int(signals.get(index))
             for bucket in (
                 by_ssid.setdefault(ssid, {"clients": 0, "_signals": []}),
@@ -599,7 +615,7 @@ class SnmpClient:
         # configured SSID sitting empty was missing from the list altogether -
         # three networks per band on each access point, and only the busy ones
         # showed. This table is indexed by ifIndex, so the names line up.
-        for ifindex, raw_count in (await self._cm_interfaces()).items():
+        for ifindex, row in (await self._cm_interfaces()).items():
             bucket = by_radio.setdefault(
                 ifindex,
                 {
@@ -611,7 +627,18 @@ class SnmpClient:
             # Registrations are per-client and carry signal, so they win where
             # they exist; this is the floor that makes an empty network visible.
             if not bucket.get("clients"):
-                bucket["clients"] = raw_count
+                bucket["clients"] = row["clients"]
+            for key in ("channel", "frequency", "band"):
+                if key in row:
+                    bucket[key] = row[key]
+
+        # The SSID a CAPsMAN interface is carrying, taken from the clients on it.
+        # Every interface observed served exactly one, but that is a property of
+        # this network rather than a guarantee, so a mixed one is left unnamed
+        # instead of being represented by whichever name won.
+        for ifindex, names_seen in ssid_per_radio.items():
+            if len(names_seen) == 1 and (bucket := by_radio.get(ifindex)):
+                bucket["ssid"] = next(iter(names_seen))
 
         for bucket in (*by_ssid.values(), *by_radio.values()):
             found = bucket.pop("_signals")
@@ -690,12 +717,19 @@ class SnmpClient:
             for index, raw in ssids.items()
         }
 
-    async def _cm_interfaces(self) -> dict[str, int]:
-        """ifIndex to client count for each interface the controller provisions.
+    async def _cm_interfaces(self) -> dict[str, dict]:
+        """What the controller says about each interface it has provisioned.
 
         Only rows in an AP state are returned: the table also carries interfaces
         that exist but are not serving, and a count against one of those would be
         a number about nothing. Empty on any device that is not a controller.
+
+        The channel is populated on the master interface of a radio and empty on
+        the virtual APs hanging off it. Those virtual APs are on the same radio and
+        therefore the same channel, but the only thing linking them to their master
+        is the operator-chosen name - ifStackTable is empty on RouterOS - so the
+        frequency is left where the device reports it rather than copied along a
+        naming convention.
         """
         source = self.profile.wireless
         if source is None or not source.cm_clients_oid:
@@ -704,14 +738,24 @@ class SnmpClient:
         if not counts:
             return {}
         states = await self.walk(source.cm_state_oid) if source.cm_state_oid else {}
-        out = {}
+        channels = (
+            await self.walk(source.cm_channel_oid) if source.cm_channel_oid else {}
+        )
+        out: dict[str, dict] = {}
         for index, raw in counts.items():
             ifindex = index.split(".")[0]
             state = str(states.get(index, "")).strip()
             if states and not state.startswith("running"):
                 continue
-            if (count := _as_int(raw)) is not None:
-                out[ifindex] = count
+            if (count := _as_int(raw)) is None:
+                continue
+            row: dict = {"clients": count}
+            if channel := str(channels.get(index, "")).strip():
+                row["channel"] = channel
+                if (freq := _channel_frequency(channel)) is not None:
+                    row["frequency"] = freq
+                    row["band"] = _band_of(freq)
+            out[ifindex] = row
         return out
 
     async def _radios_up(self, oper: dict) -> dict[str, str]:

@@ -421,6 +421,15 @@ neapkalpo, ir skaitlis par neko. Reģistrācijas joprojām uzvar tur, kur tās i
 tās ir uz katru klientu un nes signāla stiprumu; tabula ir tā apakšmala, kas
 padara tukšu tīklu redzamu.
 
+Katrs interfeiss nes arī to SSID, uz kura ir tā klienti — katrs novērotais
+apkalpoja tieši vienu, un jauktu es atstātu bez nosaukuma, nevis ar to, kurš
+uzvarēja — un radio galvenajam interfeisam vēl kanālu, ko piešķīris kontrolieris:
+`2437/20-Ce/gn(20dBm)`, saglabāts veselā gabalā kā atribūts, ar frekvenci un joslu
+nolasītām no tā sākuma. Virtuālie AP uz tā paša radio ir uz tā paša kanāla, bet
+`ifStackTable` uz RouterOS ir tukša, un vienīgais, kas tos saista ar savu galveno,
+ir operatora nosaukums — tāpēc frekvence paliek tur, kur to ziņo iekārta, nevis
+tiek pārnesta pēc konvencijas.
+
 Ko SNMP nedod: tāda SSID **nosaukumu**, uz kura nav neviena. SSID parādās tikai
 reģistrāciju tabulā, uz katru klientu, tāpēc tukšs tīkls ir atpazīstams pēc
 interfeisa — `24Ghz-<ap>-1-1` — nevis pēc SSID, ko tas raida.
