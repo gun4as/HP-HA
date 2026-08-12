@@ -229,10 +229,47 @@ That drawing is a **port list, not a chassis**. It cannot know where an SFP cage
 physically sits or how a front panel is numbered, and it marks itself `generated`
 in the geometry. A model file is what turns it into a picture of real hardware.
 
+## Faceplate templates
+
+The model dropdown lists a template for every front panel that has been drawn
+from a photograph, alongside **Detect ports automatically**:
+
+| Template | Ports |
+|---|---|
+| Aruba 2540-48G-PoE+-4SFP+ | 52 |
+| MikroTik CRS309-1G-8S+ | 9 |
+| MikroTik CRS112-8G-4S | 12 |
+| MikroTik RB2011UiAS | 11 |
+| MikroTik RB951Ui-2HnD | 5 |
+| MikroTik hAP ac³ | 5 |
+| MikroTik cAP ac | 2 |
+
+A template contributes **geometry and nothing else**. The ports themselves always
+come from the device, and a slot in a template carries a shape, a position and
+which discovered port belongs in it — never an interface name. That matters on
+RouterOS, where an interface is called whatever the operator typed: a template
+keyed on `ether1` would break the moment somebody renamed it, and a test pins
+that renaming every port on a CRS309 changes nothing about the drawing.
+
+Ports are paired with slots by position in the device's own ifIndex order. On
+every MikroTik checked that order runs left to right across the front panel,
+including a CRS309 where the RJ45 sits on the right and comes last in ifIndex.
+
+Picking a template for the wrong hardware is safe: if the port count does not
+match, netviz logs it and falls back to the automatic layout rather than drawing
+a faceplate with holes in it.
+
+One detail in the CRS112 template comes from convention rather than from the
+photograph — which of each vertical pair is the lower-numbered port. Column-major
+is what both MikroTik and HP use on two-row panels. If a port's state shows up in
+the wrong place on the card, that is the line to change in
+`tools/gen_templates.py`.
+
 ## Model files
 
-A model file is optional. It contributes faceplate geometry and nothing else —
-the ports themselves always come from the device.
+A full model file is the older format: it carries the SNMP binding as well as the
+geometry, and it is what the Aruba entry uses. Templates are preferable for new
+hardware.
 
 ```bash
 python3 tools/gen_model.py --rj45 48 --sfp 4 --numbering column --sfp-side left \

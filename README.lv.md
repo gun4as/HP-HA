@@ -212,10 +212,44 @@ Tas zīmējums ir **portu saraksts, ne korpuss**. Tas nevar zināt, kurā pusē
 fiziski ir SFP ligzda vai kā numurēts priekšpanelis, un ģeometrijā atzīmē sevi ar
 `generated`. Modeļa fails ir tas, kas to pārvērš par īstas dzelzs attēlu.
 
+## Priekšpaneļa veidnes
+
+Modeļu izvēlnē ir veidne katram priekšpanelim, kas ir uzzīmēts no foto, blakus
+**Detect ports automatically**:
+
+| Veidne | Porti |
+|---|---|
+| Aruba 2540-48G-PoE+-4SFP+ | 52 |
+| MikroTik CRS309-1G-8S+ | 9 |
+| MikroTik CRS112-8G-4S | 12 |
+| MikroTik RB2011UiAS | 11 |
+| MikroTik RB951Ui-2HnD | 5 |
+| MikroTik hAP ac³ | 5 |
+| MikroTik cAP ac | 2 |
+
+Veidne pievieno **tikai ģeometriju**. Porti vienmēr nāk no iekārtas, un slots
+veidnē satur formu, pozīciju un to, kurš atrastais ports tajā ietilpst — nekad
+interfeisa nosaukumu. Uz RouterOS tas ir būtiski, jo interfeiss saucas tā, kā
+operators ierakstījis: veidne ar `ether1` salūztu tajā mirklī, kad to pārsauc, un
+ir tests, kas pierāda, ka, pārsaucot visus CRS309 portus, zīmējums nemainās.
+
+Porti tiek piekārtoti slotiem pēc secības iekārtas paša `ifIndex` sarakstā. Visām
+pārbaudītajām MikroTik iekārtām tā secība iet no kreisās uz labo pa priekšpaneli,
+arī CRS309, kur RJ45 ir pa labi un `ifIndex` ir pēdējais.
+
+Izvēlēties veidni nepareizai dzelzij ir droši: ja portu skaits nesakrīt, netviz to
+ieraksta logā un atkāpjas uz automātisko izkārtojumu, nevis zīmē priekšpaneli ar
+caurumiem.
+
+Viena detaļa CRS112 veidnē nāk no konvencijas, ne no foto — kurš no katra
+vertikālā pāra ir mazākais numurs. Kolonnu secība ir tā, ko lieto gan MikroTik,
+gan HP uz divu rindu paneļiem. Ja kartē kāda porta stāvoklis parādās nepareizā
+vietā, tā ir tā rinda, ko mainīt `tools/gen_templates.py`.
+
 ## Modeļa faili
 
-Modeļa fails ir neobligāts. Tas pievieno priekšpaneļa ģeometriju un neko citu —
-porti vienmēr nāk no pašas iekārtas.
+Pilns modeļa fails ir vecākais formāts: tas nes arī SNMP piesaisti, ne tikai
+ģeometriju, un to lieto Aruba ieraksts. Jaunai dzelzij veidnes ir labākas.
 
 ```bash
 python3 tools/gen_model.py --rj45 48 --sfp 4 --numbering column --sfp-side left \

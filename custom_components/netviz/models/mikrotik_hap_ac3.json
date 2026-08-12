@@ -1,0 +1,53 @@
+{
+  "model": "RBD53iG-5HacD2HnD",
+  "vendor": "MikroTik",
+  "display": "MikroTik hAP ac³",
+  "match": "order",
+  "faceplate": {
+    "width": 178,
+    "height": 70,
+    "viewbox": "0 0 178 70"
+  },
+  "ports": [
+    {
+      "index": 0,
+      "kind": "rj45",
+      "x": 26,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    },
+    {
+      "index": 1,
+      "kind": "rj45",
+      "x": 52,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    },
+    {
+      "index": 2,
+      "kind": "rj45",
+      "x": 78,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    },
+    {
+      "index": 3,
+      "kind": "rj45",
+      "x": 104,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    },
+    {
+      "index": 4,
+      "kind": "rj45",
+      "x": 130,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    }
+  ]
+}

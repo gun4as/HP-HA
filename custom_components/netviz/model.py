@@ -136,6 +136,71 @@ def generated_geometry(ports: list[dict], display: str) -> dict:
     }
 
 
+def is_template(model: dict) -> bool:
+    """A template carries geometry only; its ports come from the device."""
+    return bool(model) and model.get("match") == "order"
+
+
+def template_geometry(model: dict, ports: list[dict]) -> dict | None:
+    """Pair a template's slots with discovered ports, or None if they disagree.
+
+    A slot says what shape sits where and which discovered port belongs in it,
+    by position in the device's own ifIndex order. Identity, PoE and the label
+    come from the port, never from the template - on RouterOS an interface is
+    named whatever the operator typed, and a template keyed on `ether1` would
+    break the moment somebody renamed it.
+
+    Returning None rather than half a drawing is deliberate: a template picked
+    for the wrong hardware should fall back to the automatic layout, not draw a
+    faceplate with holes in it.
+    """
+    slots = model.get("ports") or []
+    if len(slots) != len(ports):
+        _LOGGER.warning(
+            "template %s describes %d ports but the device has %d; "
+            "falling back to the automatic layout",
+            model.get("display") or model.get("model"),
+            len(slots),
+            len(ports),
+        )
+        return None
+
+    laid_out = []
+    for slot in slots:
+        index = slot.get("index")
+        if not isinstance(index, int) or not 0 <= index < len(ports):
+            _LOGGER.warning(
+                "template %s has a slot pointing at port %r, which does not exist",
+                model.get("display") or model.get("model"),
+                index,
+            )
+            return None
+        port = ports[index]
+        name = str(port.get("label", port["id"]))
+        label = short_label(name)
+        laid_out.append({
+            "id": str(port["id"]),
+            "label": label,
+            "name": name if name != label else None,
+            "kind": slot.get("kind", "rj45"),
+            "poe": bool(port.get("poe")),
+            "x": slot["x"],
+            "y": slot["y"],
+            "w": slot["w"],
+            "h": slot["h"],
+        })
+
+    faceplate = model.get("faceplate", {})
+    return {
+        "model": model.get("model"),
+        "display": model.get("display"),
+        "width": faceplate.get("width"),
+        "height": faceplate.get("height"),
+        "viewbox": faceplate.get("viewbox"),
+        "ports": laid_out,
+    }
+
+
 def faceplate_geometry(model: dict) -> dict:
     """Compact geometry for the card - without the SNMP fields."""
     return {

@@ -39,7 +39,12 @@ from .const import (
 )
 from .coordinator import NetvizConfigEntry, NetvizCoordinator
 from .entity import NetvizEntity, NetvizPortEntity
-from .model import faceplate_geometry, generated_geometry
+from .model import (
+    faceplate_geometry,
+    generated_geometry,
+    is_template,
+    template_geometry,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -354,8 +359,13 @@ class NetvizFaceplateSensor(NetvizEntity, SensorEntity):
 
     def __init__(self, coordinator: NetvizCoordinator) -> None:
         super().__init__(coordinator, "faceplate")
-        if coordinator.model.get("ports"):
-            self._geometry = faceplate_geometry(coordinator.model)
+        geometry = None
+        if is_template(coordinator.model):
+            geometry = template_geometry(coordinator.model, coordinator.ports)
+        elif coordinator.model.get("ports"):
+            geometry = faceplate_geometry(coordinator.model)
+        if geometry is not None:
+            self._geometry = geometry
         else:
             # No model file: lay the discovered ports out so the card has
             # something to draw. It is a drawing of a port list rather than of

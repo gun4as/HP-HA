@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/gun4as/HP-HA/issues",
   "loggers": ["pyasn1", "pysnmp"],
   "requirements": ["pysnmp==7.1.27"],
-  "version": "0.4.0b6"
+  "version": "0.4.0b7"
 }

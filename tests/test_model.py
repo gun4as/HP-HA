@@ -15,7 +15,17 @@ import pytest
 
 from conftest import ROOT, model
 
-MODELS = sorted((ROOT / "custom_components" / "netviz" / "models").glob("*.json"))
+ALL_FILES = sorted((ROOT / "custom_components" / "netviz" / "models").glob("*.json"))
+
+
+def _load(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+# A template is geometry only - its ports come from the device - so it has a
+# different set of invariants from a full model that also carries SNMP bindings.
+TEMPLATES = [p for p in ALL_FILES if _load(p).get("match") == "order"]
+MODELS = [p for p in ALL_FILES if p not in TEMPLATES]
 
 
 def _gen_model():
@@ -54,11 +64,14 @@ def test_model_invariants(path):
         assert bool(port.get("poe")) == ("poe_index" in port)
 
 
-@pytest.mark.parametrize("path", MODELS, ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", ALL_FILES, ids=lambda p: p.stem)
 def test_ports_do_not_overlap(path):
     """Overlapping rectangles mean the card draws one port on top of another."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    boxes = [(p["id"], p["x"], p["y"], p["w"], p["h"]) for p in data["ports"]]
+    data = _load(path)
+    boxes = [
+        (p.get("id", p.get("index")), p["x"], p["y"], p["w"], p["h"])
+        for p in data["ports"]
+    ]
     for i, (id_a, ax, ay, aw, ah) in enumerate(boxes):
         for id_b, bx, by, bw, bh in boxes[i + 1:]:
             overlap = ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
@@ -190,3 +203,122 @@ def test_ports_run_left_to_right_in_reported_order():
     top = [p["label"] for p in laid if p["y"] == min(q["y"] for q in laid)]
     assert top == ["ether1", "ether2", "ether3", "ether4", "ether5", "ether6"]
     assert [p["x"] for p in laid[:6]] == sorted(p["x"] for p in laid[:6])
+
+
+# ------------------------------------------------------------------- templates
+
+
+def test_there_is_a_template_for_hardware_that_has_been_photographed():
+    assert TEMPLATES, "no templates, so the model dropdown offers only one vendor"
+
+
+@pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.stem)
+def test_template_invariants(path):
+    data = _load(path)
+    slots = data["ports"]
+    face = data["faceplate"]
+
+    assert face["viewbox"] == f"0 0 {face['width']} {face['height']}"
+    assert data.get("display") and data.get("model")
+
+    for slot in slots:
+        # A slot is geometry and a pointer, never a name. An interface on
+        # RouterOS is called whatever the operator typed, so a template that
+        # named one would break the moment somebody renamed it.
+        assert set(slot) == {"index", "kind", "x", "y", "w", "h"}
+        assert slot["kind"] in ("rj45", "sfp+")
+        assert slot["x"] + slot["w"] <= face["width"]
+        assert slot["y"] + slot["h"] <= face["height"]
+
+    # every discovered port gets exactly one slot, and none points past the end
+    indices = sorted(slot["index"] for slot in slots)
+    assert indices == list(range(len(slots))), f"{path.stem} has gaps or duplicates"
+
+
+@pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.stem)
+def test_template_pairs_with_discovered_ports(path):
+    """Identity comes from the device, geometry from the template."""
+    data = _load(path)
+    slots = data["ports"]
+    discovered = [
+        {"id": f"ether{i + 1}", "label": f"ether{i + 1}", "poe": i == 0}
+        for i in range(len(slots))
+    ]
+    geometry = model.template_geometry(data, discovered)
+    assert geometry is not None
+    assert len(geometry["ports"]) == len(slots)
+    assert geometry["viewbox"] == data["faceplate"]["viewbox"]
+
+    by_id = {p["id"]: p for p in geometry["ports"]}
+    assert set(by_id) == {p["id"] for p in discovered}
+    # PoE comes from the device, shape from the template
+    assert by_id["ether1"]["poe"] is True
+    kinds = {p["id"]: p["kind"] for p in geometry["ports"]}
+    for slot in slots:
+        assert kinds[discovered[slot["index"]]["id"]] == slot["kind"]
+
+
+def test_a_template_for_the_wrong_hardware_is_refused():
+    """Better the automatic layout than a faceplate with holes in it."""
+    template = model.load_model(TEMPLATES[0].stem)
+    too_few = [{"id": "ether1", "label": "ether1"}]
+    assert model.template_geometry(template, too_few) is None
+
+
+def test_renaming_an_interface_does_not_break_a_template():
+    """The whole reason slots carry an index instead of a name."""
+    template = model.load_model("mikrotik_crs309")
+    renamed = [
+        {"id": f"uplink to somewhere {i}", "label": f"uplink to somewhere {i}"}
+        for i in range(len(template["ports"]))
+    ]
+    geometry = model.template_geometry(template, renamed)
+    assert geometry is not None
+    assert len(geometry["ports"]) == len(renamed)
+    # the long name is shortened for the drawing but kept for the tooltip
+    assert all(len(p["label"]) <= 10 for p in geometry["ports"])
+    assert all(p["name"] for p in geometry["ports"])
+
+
+@pytest.mark.parametrize(
+    ("template", "fixture_name", "expected"),
+    [
+        ("mikrotik_crs309", "crs309", 9),
+        ("mikrotik_rb2011", "rb2011", 11),
+        ("mikrotik_rb951", "rb951", 5),
+        ("mikrotik_hap_ac3", "capsman", 5),
+    ],
+)
+def test_templates_fit_the_hardware_they_were_drawn_for(
+    template, fixture_name, expected, request
+):
+    """Each template against the ports its own device actually reported."""
+    snapshot = request.getfixturevalue(fixture_name)
+    ports = snapshot.physical_ports()
+    assert len(ports) == expected
+
+    geometry = model.template_geometry(model.load_model(template), ports)
+    assert geometry is not None, f"{template} did not fit {fixture_name}"
+    assert len(geometry["ports"]) == expected
+
+    # the SFP cages in the drawing are the ports the device calls sfp
+    drawn_sfp = {p["id"] for p in geometry["ports"] if p["kind"] == "sfp+"}
+    reported_sfp = {p["id"] for p in ports if p["id"].lower().startswith("sfp")}
+    assert drawn_sfp == reported_sfp, f"{template} puts SFP+ in the wrong slots"
+
+
+def test_the_crs309_rj45_is_drawn_on_the_right():
+    """Its ifIndex order puts ether1 last, and so does its front panel.
+
+    The photograph shows SFP+ 1 through 8 and then the RJ45 marked POE/BOOT, so
+    the port that comes last in discovery is also the rightmost - the opposite of
+    the JL357A, where the SFP cage is on the left.
+    """
+    from conftest import Snapshot, FIXTURES
+
+    ports = Snapshot(FIXTURES / "crs309.json").physical_ports()
+    assert ports[-1]["id"] == "ether1"
+    geometry = model.template_geometry(model.load_model("mikrotik_crs309"), ports)
+    drawn = {p["id"]: p["x"] for p in geometry["ports"]}
+    assert drawn["ether1"] == max(drawn.values())
+    assert drawn["sfp-sfpplus1"] == min(drawn.values())
