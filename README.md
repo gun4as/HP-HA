@@ -468,6 +468,9 @@ this is not it. A test asserts that no MAC address can reach an entity.
 
 ## Not there yet
 
+- A radio or a port that appears after the integration was set up gets no
+  entity and no faceplate block until the config entry is reloaded: both are
+  built once, when the entry loads.
 - Memory sensors, although memory is already polled on both vendors
 - LLDP neighbours (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
 - MAC table per port (`dot1dTpFdbPort`)

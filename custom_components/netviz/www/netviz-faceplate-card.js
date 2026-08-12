@@ -34,6 +34,9 @@ const RADIO_DOWN = "var(--disabled-color, #6f7378)";
 // A controller manages this radio: it is transmitting, but the device cannot say
 // how many clients are on it. Idle green would be a lie, grey doubly so.
 const RADIO_MANAGED = "#2e6ea3";
+// No entity behind the block at all. Drawn hollow, because grey is what a radio
+// that is switched off looks like, and "I was not told" is a different thing.
+const RADIO_NO_ENTITY = "var(--card-background-color, #1c1c1c)";
 
 const LINK_COLORS = {
   down: "var(--disabled-color, #6f7378)",
@@ -437,6 +440,8 @@ class NetvizFaceplateCard extends HTMLElement {
     // null, not 0: "no radio gave a number" and "every radio reported nobody"
     // read the same once summed, and only one of them is a measurement.
     let radioClients = null;
+    let managedRadio = false;
+    let missingRadio = false;
     for (const [radioId, node] of Object.entries(this._radioNodes || {})) {
       const state = (states[radioId] || {}).radio;
       const attrs = (state && state.attributes) || {};
@@ -444,14 +449,28 @@ class NetvizFaceplateCard extends HTMLElement {
       const up = attrs.up !== false;
 
       let colour = RADIO_DOWN;
-      if (state && up) {
+      if (!state) colour = RADIO_NO_ENTITY;
+      else if (up) {
         if (attrs.managed) colour = RADIO_MANAGED;
         else colour = clients > 0 ? RADIO_BUSY : RADIO_IDLE;
       }
       node.body.setAttribute("fill", colour);
+      // A hollow block is a block with nothing behind it, and the dashes say so
+      // even to somebody who cannot tell the two greys apart.
+      node.body.setAttribute("stroke-dasharray", state ? "" : "3 2");
+      if (!state) missingRadio = true;
       if (Number.isFinite(clients)) radioClients = (radioClients || 0) + clients;
+      if (attrs.managed) managedRadio = true;
 
       const lines = [attrs.interface || node.def.label];
+      if (!state) {
+        lines.push(
+          "no entity for this radio - enable it on the device page, " +
+          "or reload the integration if it appeared after setup"
+        );
+        node.tooltip.textContent = lines.join(" · ");
+        continue;
+      }
       if (attrs.ssid) lines.push(attrs.ssid);
       lines.push(up ? "up" : "down");
       if (attrs.managed) {
@@ -469,7 +488,7 @@ class NetvizFaceplateCard extends HTMLElement {
     this._summary.textContent =
       `${up}/${total} up` +
       (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "") +
-      this._wirelessSummary(radioClients);
+      this._wirelessSummary(radioClients, managedRadio, missingRadio);
   }
 
   /**
@@ -480,14 +499,15 @@ class NetvizFaceplateCard extends HTMLElement {
    * interfaces belonging to the access points it manages. Where neither number
    * exists the clause is left out rather than printed as a zero.
    */
-  _wirelessSummary(fromBlocks) {
+  _wirelessSummary(fromBlocks, managed, missing) {
     if (!Object.keys(this._radioNodes || {}).length) return "";
     const total = (this._portStates().system || {}).wireless_clients;
     const count = total ? Number(total.state) : fromBlocks;
     if (count === null || !Number.isFinite(count)) {
-      return " · wireless counted on the controller";
+      if (missing) return " · wireless: no entity";
+      return managed ? " · wireless counted on the controller" : " · wireless unknown";
     }
-    return ` · ${count} wireless`;
+    return ` · ${count} wireless` + (missing ? " (some radios have no entity)" : "");
   }
 
   /** Clicking a port opens the more-info dialog of its link entity. */
@@ -525,4 +545,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.3 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.4 ", "background:#2ea3f2;color:#fff", "");

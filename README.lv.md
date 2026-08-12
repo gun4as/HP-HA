@@ -439,6 +439,9 @@ MAC adrese nevar nonākt entītijā.
 
 ## Vēl nav
 
+- Radio vai ports, kas parādās pēc integrācijas pievienošanas, nedabū ne
+  entītiju, ne bloku priekšpanelī, kamēr ieraksts netiek pārlādēts: abi tiek
+  uzbūvēti vienreiz, ierakstam ielādējoties.
 - Atmiņas sensori, lai gan atmiņa jau tiek aptaujāta abiem ražotājiem
 - LLDP kaimiņi (LLDP-MIB `1.0.8802.1.1.2.1.4.1.1`)
 - MAC tabula uz portu (`dot1dTpFdbPort`)
