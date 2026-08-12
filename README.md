@@ -31,7 +31,7 @@ actually implements.
 | Port descriptions | `ifAlias` | `ifName` | both |
 | PVID per port | yes | yes | yes |
 | VLAN membership, access vs trunk | yes | no | if Q-BRIDGE is filled |
-| PoE per port | yes, milliwatts | yes, units unverified | no |
+| PoE per port | yes, milliwatts | status only, see below | no |
 | PoE budget and consumption | yes | no | no |
 | CPU | yes | yes, averaged over cores | no |
 | Serial number as unique_id | ENTITY-MIB chassis row | `mtxrSerialNumber` | ENTITY-MIB if present |
@@ -41,19 +41,22 @@ that belongs to somebody else and reporting the resulting zero as a measurement 
 worse than reporting nothing.
 
 Tested against an Aruba 2540-48G-PoE+-4SFP+ (JL357A) on ArubaOS-Switch 16.11, and
-against RouterOS 7.20–7.21 on a hAP ac³, two cAP ac and an RB2011UiAS.
+against RouterOS 7.20–7.22 on eight devices: a hAP ac³, two cAP ac, two RB2011UiAS,
+an RB951G, a CRS309-1G-8S+ and a CRS112-8G-4S.
 
 ### Known gaps on RouterOS
 
-- **PoE power units are unverified.** Every MikroTik available for testing had one
-  PoE-out port with nothing plugged into it, so voltage, current and power all
-  read zero and the divisor could not be confirmed. It is marked as an assumption
-  in `profiles.py`. If your reading looks wrong by a factor of ten, that is why.
+- **PoE power is not measured on passive PoE-out.** An RB2011 with a powered
+  device attached reports `delivering` while voltage, current and power all read
+  zero, because that hardware has no measurement circuit. The status sensor is
+  therefore useful and the power sensor reports unknown rather than a false 0 W.
+  Hardware that does measure, such as a CRS328-24P, has not been tested, and the
+  unit divisor for it remains an assumption.
 - **VLAN membership is unavailable.** RouterOS fills `dot1qPvid` but leaves
   `dot1qVlanStaticEgressPorts` empty, so netviz reports the PVID and says nothing
-  about access versus trunk rather than guessing. This was confirmed on a router
-  and three access points; a CRS switch with bridge VLAN filtering may well
-  populate the table, and the profile would then be wrong to assume otherwise.
+  about access versus trunk rather than guessing. Confirmed across all eight
+  devices, including two CRS switches with bridge VLAN filtering — so this is the
+  vendor rather than a class of device.
 - **Wireless needs the controller.** A managed access point answers almost
   nothing about its own radios, so pointing netviz at one gives ports and no
   wireless. Point it at the CAPsMAN controller instead and it covers every AP.

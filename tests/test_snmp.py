@@ -402,3 +402,69 @@ async def test_devices_that_are_not_controllers_report_no_wireless(rb2011, aruba
         data = await FixtureClient(snapshot).poll(snapshot.physical_ports())
         assert data["wireless"] == {}
         assert data["system"]["wireless_clients"] is None
+
+
+# --------------------------------------------------- a RouterOS switch, not a router
+
+
+async def test_a_routeros_switch_also_leaves_qbridge_empty(crs309):
+    """The profile claims this of the vendor, not of routers and access points.
+
+    A CRS309 is a switch with bridge VLAN filtering, and the obvious objection to
+    `vlan_egress=False` was that it had only been checked on routers and APs.
+    It leaves the egress table empty too.
+    """
+    assert crs309.walk(snmp.OID_VLAN_EGRESS) == {}
+    assert crs309.walk(snmp.OID_DOT1Q_PVID), "fixture lost its PVID table"
+
+    data = await FixtureClient(crs309).poll(crs309.physical_ports())
+    assert all("mode" not in p for p in data["ports"].values())
+    assert any(p.get("pvid") is not None for p in data["ports"].values())
+
+
+async def test_sfp_ports_are_discovered_like_any_other(crs309):
+    """SFP+ cages report ifType 6 as well, so nothing special is needed."""
+    ports = crs309.physical_ports()
+    assert len(ports) == 9
+    names = [p["id"] for p in ports]
+    assert sum(1 for n in names if n.startswith("sfp")) == 8
+
+    data = await FixtureClient(crs309).poll(ports)
+    assert len(data["ports"]) == 9
+    # no PoE table and no radios on this box, and nothing may be invented
+    assert all("poe_power" not in p for p in data["ports"].values())
+    assert data["wireless"] == {}
+
+
+async def test_cpu_averaging_works_at_two_cores_as_well(crs309):
+    from conftest import profiles
+
+    loads = [int(v) for v in crs309.walk(profiles.OID_HR_CPU).values()]
+    assert len(loads) == 2
+    data = await FixtureClient(crs309).poll(crs309.physical_ports())
+    assert data["system"]["cpu"] == round(sum(loads) / len(loads))
+
+
+async def test_delivering_with_zero_power_reports_unknown(rb2011):
+    """Passive PoE-out has no measurement hardware.
+
+    An RB2011 says `delivering` while voltage, current and power all read zero.
+    0 W on a port that is powering something is a false measurement; unknown is
+    the true answer.
+    """
+    from conftest import profiles
+
+    client = FixtureClient(rb2011)
+    await client._ensure_profile()
+    poe = profiles.ROUTEROS.poe
+    # force the fixture's one PoE port into the delivering-but-unmeasured state
+    ports = await client.discover_ports()
+    poe_port = next(p for p in ports if p["poe"])
+    key = str(poe_port["ifindex"])
+    rb2011.data["walks"][poe.power_oid][key] = "0"
+    rb2011.data["walks"][poe.status_oid][key] = "3"
+
+    data = await client.poll(ports)
+    result = data["ports"][poe_port["id"]]
+    assert result["poe_status"] == "delivering"
+    assert result["poe_power"] is None

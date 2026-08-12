@@ -30,7 +30,7 @@ atbalsta.
 | Portu apraksti | `ifAlias` | `ifName` | abi |
 | PVID uz portu | jā | jā | jā |
 | VLAN dalība, access vai trunk | jā | nē | ja Q-BRIDGE ir aizpildīts |
-| PoE uz portu | jā, milivatos | jā, mērvienības nepārbaudītas | nē |
+| PoE uz portu | jā, milivatos | tikai statuss, skat. zemāk | nē |
 | PoE budžets un patēriņš | jā | nē | nē |
 | CPU | jā | jā, vidējots pa kodoliem | nē |
 | Seriālnumurs kā unique_id | ENTITY-MIB šasijas rinda | `mtxrSerialNumber` | ENTITY-MIB, ja ir |
@@ -40,20 +40,21 @@ ražotāja privāto OID un tā iegūto nulli pasniegt kā mērījumu ir sliktāk
 nerādīt neko.
 
 Pārbaudīts pret Aruba 2540-48G-PoE+-4SFP+ (JL357A) ar ArubaOS-Switch 16.11, un
-pret RouterOS 7.20–7.21 uz hAP ac³, divām cAP ac un RB2011UiAS.
+pret RouterOS 7.20–7.22 uz astoņām iekārtām: hAP ac³, divām cAP ac, divām
+RB2011UiAS, RB951G, CRS309-1G-8S+ un CRS112-8G-4S.
 
 ### Zināmi trūkumi uz RouterOS
 
-- **PoE jaudas mērvienības nav pārbaudītas.** Visām testēšanai pieejamajām
-  MikroTik iekārtām bija viens PoE-out ports ar neko iespraustu, tāpēc spriegums,
-  strāva un jauda visi rādīja nulli un dalītāju apstiprināt nevarēja. Kodā
-  (`profiles.py`) tas ir atzīmēts kā pieņēmums. Ja rādījums izskatās desmitreiz
-  greizs, tas ir iemesls.
+- **Pasīvajam PoE-out jauda netiek mērīta.** RB2011 ar pieslēgtu patērētāju
+  rāda `delivering`, bet spriegums, strāva un jauda visi ir nulle, jo tai dzelzij
+  nav mērīšanas ķēdes. Tāpēc statusa sensors ir noderīgs, bet jaudas sensors rāda
+  `unknown`, nevis nepatiesu 0 W. Dzelzs, kas jaudu mēra, piemēram CRS328-24P,
+  nav pārbaudīta, un mērvienību dalītājs tai paliek pieņēmums.
 - **VLAN dalība nav pieejama.** RouterOS aizpilda `dot1qPvid`, bet atstāj
   `dot1qVlanStaticEgressPorts` tukšu, tāpēc netviz rāda PVID un par access vai
-  trunk klusē, nevis min. Apstiprināts uz viena maršrutētāja un trim AP; CRS
-  switch ar bridge VLAN filtering to tabulu var arī aizpildīt, un tad profila
-  pieņēmums par visu ražotāju būtu nepareizs.
+  trunk klusē, nevis min. Apstiprināts uz visām astoņām iekārtām, ieskaitot divus
+  CRS switch'us ar bridge VLAN filtering — tātad tā ir ražotāja, nevis konkrētas
+  iekārtu klases īpašība.
 - **Bezvadu daļai vajag kontrolieri.** Pārvaldīta AP par saviem radio neatbild
   gandrīz neko, tāpēc, norādot netviz uz to, dabū portus un nekādu bezvadu daļu.
   Norādi uz CAPsMAN kontrolieri, un tas sedz visas AP.

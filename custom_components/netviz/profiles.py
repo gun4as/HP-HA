@@ -1,6 +1,6 @@
 """What differs between vendors, expressed as data.
 
-Four devices were probed to build this, and the differences turned out not to be
+Nine devices were probed to build this, and the differences turned out not to be
 a matter of swapping OIDs. The *shape* differs too: a serial number is a chosen
 row of a table on one vendor and a scalar on another, CPU is one value here and
 four there, PoE is indexed by port number on one and by ifIndex on the other.
@@ -135,8 +135,10 @@ class Profile:
     poe: PoeSource | None = None
     wireless: WirelessSource | None = None
     # Whether dot1qVlanStaticEgressPorts is populated. RouterOS fills dot1qPvid
-    # and leaves the egress table empty, and without membership data there is no
-    # evidence for access versus trunk.
+    # and leaves the egress table empty - confirmed across eight devices on
+    # 7.20 to 7.22, including two CRS switches, so this is the vendor rather
+    # than a class of device. Without membership data there is no evidence for
+    # access versus trunk.
     vlan_egress: bool = True
     # Whether ports can be discovered from ifType instead of a model file.
     discover_ports: bool = True
@@ -176,10 +178,12 @@ ROUTEROS = Profile(
     memory=MemorySource(storage_match="main memory"),
     poe=PoeSource(
         power_oid="1.3.6.1.4.1.14988.1.1.15.1.1.6",
-        # Unverified: every MikroTik probed had exactly one PoE-out port with
-        # nothing plugged into it, so voltage, current and power all read zero.
-        # Until a load can be measured this divisor is an assumption, and it is
-        # the one thing in this file that is not backed by data.
+        # Still unverified, and now known to be mostly moot. Across eight
+        # RouterOS devices the only PoE-out port found under load - an RB2011
+        # with `status=delivering` - reported voltage, current and power all
+        # zero, because passive PoE-out has no measurement hardware. poll()
+        # therefore reports unknown rather than 0 W, and this divisor only
+        # matters on hardware that does measure, such as a CRS328-24P.
         power_divisor=1,
         index="ifindex",
         status_oid="1.3.6.1.4.1.14988.1.1.15.1.1.3",

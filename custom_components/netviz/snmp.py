@@ -673,13 +673,19 @@ class SnmpClient:
                         else str(pdef.get("poe_index", f"1.{pid}"))
                     )
                     raw_power = _as_int(poe_power.get(pidx))
-                    port["poe_status"] = poe.status_map.get(
+                    status = poe.status_map.get(
                         _as_int(poe_status.get(pidx)), "unknown"
                     )
-                    port["poe_power"] = (
-                        round(raw_power / poe.power_divisor, 1)
-                        if raw_power is not None else None
-                    )
+                    port["poe_status"] = status
+                    # Passive PoE-out has no measurement hardware. An RB2011
+                    # reports `delivering` with voltage, current and power all
+                    # reading zero, and 0 W on a port that is powering something
+                    # is a false measurement dressed as a real one. Unknown is
+                    # the true answer.
+                    if raw_power is None or (raw_power == 0 and status == "delivering"):
+                        port["poe_power"] = None
+                    else:
+                        port["poe_power"] = round(raw_power / poe.power_divisor, 1)
 
                 vinfo = vlan_map.get(ifindex)
                 if vinfo:

@@ -129,6 +129,12 @@ def rb2011() -> Snapshot:
 
 
 @pytest.fixture
+def crs309() -> Snapshot:
+    """MikroTik CRS309-1G-8S+: a switch, all SFP+, no PoE, no radios."""
+    return Snapshot(FIXTURES / "crs309.json")
+
+
+@pytest.fixture
 def capsman() -> Snapshot:
     """MikroTik hAP ac3 acting as CAPsMAN controller: 48 client registrations."""
     return Snapshot(FIXTURES / "capsman.json")
