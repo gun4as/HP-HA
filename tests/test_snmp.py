@@ -608,6 +608,33 @@ async def test_a_provisioned_access_point_admits_it_cannot_count(capac):
     assert data["system"]["wireless_clients"] == 0
 
 
+async def test_a_silent_access_point_still_shows_the_radios_it_has(capac_silent):
+    """Six radios up, no mtxrWlAp row, and two of them are real.
+
+    This is what "10.10.0.2 has no wifi" was: the device says nothing about its
+    radios, so netviz drew none, on an access point whose wireless was on. The
+    interface MAC settles it - the locally-administered bit is clear only on the
+    two the hardware has, and the four the controller created are excluded.
+    """
+    data = await FixtureClient(capac_silent).poll(capac_silent.physical_ports())
+    own = {i: r for i, r in data["wireless"]["radios"].items() if r.get("local")}
+    assert len(own) == 2, "a cAP ac has two radios, not six and not none"
+    for radio in own.values():
+        assert radio["up"] is True
+        assert radio["managed"] is True
+        assert radio["clients"] is None
+        # No mtxrWlAp row means no frequency, so there is no band to claim
+        assert "band" not in radio
+        assert "ssid" not in radio
+    assert sorted(r["name"] for r in own.values()) == ["wlan1", "wlan2"]
+
+
+async def test_a_controller_created_radio_gets_no_block(capac_silent):
+    """The four the controller invented are not this device's to show."""
+    data = await FixtureClient(capac_silent).poll(capac_silent.physical_ports())
+    assert len(data["wireless"]["radios"]) == 2, "only the burned-in two"
+
+
 async def test_a_standalone_radio_still_counts_its_own_clients(rb951):
     """The heuristic must not fire where no controller is involved.
 

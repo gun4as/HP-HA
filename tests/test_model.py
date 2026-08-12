@@ -378,13 +378,22 @@ def test_a_panel_with_unique_numbers_keeps_them_bare():
 # ------------------------------------------------------------------ radio blocks
 
 
-def _radio(ifindex, band=None, ssid="net", clients=0, name="wlan1"):
+def _radio(ifindex, band=None, ssid="net", clients=0, name="wlan1", local=True):
+    """One entry of wireless["radios"].
+
+    `local` is what marks the device's own hardware, as against a radio a
+    controller reports on behalf of an access point somewhere else. It is set
+    independently of `ssid`, because a provisioned access point has its own
+    radios and yet no mtxrWlAp row to describe them.
+    """
     radio = {"name": name, "clients": clients, "signal_avg": None,
              "signal_min": None, "signal_max": None}
     if ssid is not None:
         radio |= {"ssid": ssid, "noise_floor": -95, "quality": 70,
                   "frequency": 2412 if band == "2.4G" else 5180, "band": band,
                   "up": True}
+    if local:
+        radio["local"] = True
     return {ifindex: radio}
 
 
@@ -422,6 +431,20 @@ def test_only_radios_the_device_serves_itself_get_a_block():
                        "signal_avg": -54, "signal_min": -70, "signal_max": -37}}
     grown = model.with_radios(model.generated_geometry(ports, "ctl"), radios)
     assert [r["id"] for r in grown["radios"]] == ["radio-1"]
+
+
+def test_a_provisioned_radio_gets_a_block_without_an_ssid():
+    """An access point a controller provisions has no mtxrWlAp row.
+
+    Its radios are still its own hardware and still transmitting, so they belong
+    on its faceplate. With no frequency there is no band, so the block falls
+    back to the interface name.
+    """
+    ports = [{"id": "ether1", "label": "ether1"}]
+    radios = _radio("1", ssid=None) | _radio("2", ssid=None, name="wlan2")
+    grown = model.with_radios(model.generated_geometry(ports, "ap"), radios)
+    assert [r["id"] for r in grown["radios"]] == ["radio-1", "radio-2"]
+    assert [r["label"] for r in grown["radios"]] == ["wlan1", "wlan2"]
 
 
 def test_radios_are_ordered_by_frequency():

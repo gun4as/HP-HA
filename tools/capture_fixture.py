@@ -33,6 +33,10 @@ WALK_OIDS = {
     # ifType is how physical ports are found without trusting ifName: 6 is
     # ethernetCsmacd everywhere, while ifName is whatever the admin typed
     "1.3.6.1.2.1.2.2.1.3": ("ifType", False),
+    # ifPhysAddress separates a radio the hardware has from one a controller
+    # created: IEEE's locally-administered bit is clear only on a burned-in
+    # address. Raw, because six octets are not text - str() turns 0x48 into "H"
+    "1.3.6.1.2.1.2.2.1.6": ("ifPhysAddress", True),
     "1.3.6.1.2.1.2.2.1.7": ("ifAdminStatus", False),
     "1.3.6.1.2.1.2.2.1.8": ("ifOperStatus", False),
     "1.3.6.1.2.1.31.1.1.1.1": ("ifName", False),

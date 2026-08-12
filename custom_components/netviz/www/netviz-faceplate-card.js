@@ -434,7 +434,9 @@ class NetvizFaceplateCard extends HTMLElement {
       node.tooltip.textContent = lines.join(" · ");
     }
 
-    let radioClients = 0;
+    // null, not 0: "no radio gave a number" and "every radio reported nobody"
+    // read the same once summed, and only one of them is a measurement.
+    let radioClients = null;
     for (const [radioId, node] of Object.entries(this._radioNodes || {})) {
       const state = (states[radioId] || {}).radio;
       const attrs = (state && state.attributes) || {};
@@ -447,7 +449,7 @@ class NetvizFaceplateCard extends HTMLElement {
         else colour = clients > 0 ? RADIO_BUSY : RADIO_IDLE;
       }
       node.body.setAttribute("fill", colour);
-      if (Number.isFinite(clients)) radioClients += clients;
+      if (Number.isFinite(clients)) radioClients = (radioClients || 0) + clients;
 
       const lines = [attrs.interface || node.def.label];
       if (attrs.ssid) lines.push(attrs.ssid);
@@ -467,9 +469,25 @@ class NetvizFaceplateCard extends HTMLElement {
     this._summary.textContent =
       `${up}/${total} up` +
       (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "") +
-      (Object.keys(this._radioNodes || {}).length
-        ? ` · ${radioClients} wireless`
-        : "");
+      this._wirelessSummary(radioClients);
+  }
+
+  /**
+   * The wireless part of the summary line.
+   *
+   * A device's own total beats adding up the blocks: on a controller the blocks
+   * are its provisioned radios, which report nothing, while the clients are on
+   * interfaces belonging to the access points it manages. Where neither number
+   * exists the clause is left out rather than printed as a zero.
+   */
+  _wirelessSummary(fromBlocks) {
+    if (!Object.keys(this._radioNodes || {}).length) return "";
+    const total = (this._portStates().system || {}).wireless_clients;
+    const count = total ? Number(total.state) : fromBlocks;
+    if (count === null || !Number.isFinite(count)) {
+      return " · wireless counted on the controller";
+    }
+    return ` · ${count} wireless`;
   }
 
   /** Clicking a port opens the more-info dialog of its link entity. */
@@ -507,4 +525,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.2 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.3 ", "background:#2ea3f2;color:#fff", "");

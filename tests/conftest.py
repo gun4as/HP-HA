@@ -157,3 +157,15 @@ def capac() -> Snapshot:
     client count as zero.
     """
     return Snapshot(FIXTURES / "capac.json")
+
+
+@pytest.fixture
+def capac_silent() -> Snapshot:
+    """MikroTik cAP ac provisioned by a controller, answering nothing at all.
+
+    Six radio interfaces up and not one row in mtxrWlAp, so there is no client
+    count, no SSID, no frequency - and yet two of those six are the radios the
+    hardware actually has. The interface MAC addresses are the only thing that
+    separates them: two are burned in, four were invented by the controller.
+    """
+    return Snapshot(FIXTURES / "capac-silent.json")

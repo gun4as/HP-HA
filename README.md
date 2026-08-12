@@ -59,8 +59,8 @@ an RB951G, a CRS309-1G-8S+ and a CRS112-8G-4S.
   vendor rather than a class of device.
 - **Wireless needs the controller.** A managed access point cannot count clients
   on its own radios — it answers either nothing or its unused local configuration
-  — so netviz marks those radios as managed and reports the count as unknown.
-  Point it at the CAPsMAN controller as well and every AP is covered.
+  — so netviz shows the radios but reports the count as unknown. Point it at the
+  CAPsMAN controller as well and every AP is covered.
 
 ## Installing through HACS
 
@@ -321,8 +321,9 @@ their files, so a real `SnmpClient` runs with only `walk()` and `get_many()` fed
 from a recorded snapshot. Everything above those two methods is the production
 code path.
 
-Six snapshots: a JL357A, a MikroTik RB2011, a CRS309 switch, a standalone AP, a
-CAPsMAN controller and an AP that controller provisions. They disagree in useful
+Seven snapshots: a JL357A, a MikroTik RB2011, a CRS309 switch, a standalone AP, a
+CAPsMAN controller, and two APs that controller provisions — one that reports a
+little about its radios and one that reports nothing. They disagree in useful
 ways, and every disagreement below produced a wrong answer that looked like a
 right one until a test pinned it:
 
@@ -341,6 +342,9 @@ right one until a test pinned it:
 - a provisioned access point reports six radios up but only two rows in
   `mtxrWlAp`, both with the factory SSID and no clients, which had netviz drawing
   two idle radios on a device serving eighteen clients
+- the one next to it reports six radios up and no rows at all, so netviz drew no
+  wireless on an access point whose wireless was on — only the locally-
+  administered bit in each interface's MAC says which two are the hardware
 
 The tests never touch hardware — they run against snapshots taken from real
 devices and then scrubbed. Two steps, and the second one is mandatory:
@@ -365,6 +369,7 @@ Standard MIBs, read on every device:
 |---|---|---|
 | ifName / ifAlias | `1.3.6.1.2.1.31.1.1.1.1` / `.18` | IF-MIB |
 | ifType — how physical ports are found | `1.3.6.1.2.1.2.2.1.3` | IF-MIB |
+| ifPhysAddress — a real radio against a controller's | `1.3.6.1.2.1.2.2.1.6` | IF-MIB |
 | ifOperStatus / ifAdminStatus | `1.3.6.1.2.1.2.2.1.8` / `.7` | IF-MIB |
 | ifHighSpeed | `1.3.6.1.2.1.31.1.1.1.15` | IF-MIB |
 | ifHCInOctets / ifHCOutOctets | `1.3.6.1.2.1.31.1.1.1.6` / `.10` | IF-MIB |
@@ -424,19 +429,29 @@ knowing if a device reports no wireless when you expected some.
 ### A managed access point does not know its own client count
 
 Ask a CAPsMAN-provisioned AP directly and one of two things happens. Either it
-answers nothing at all — no `mtxrWlAp` rows, so netviz draws no radios — or it
-answers with the *local* configuration nobody is being served by: the factory
-SSID and zero clients, while its real clients are on the controller. Both were
-observed on cAP ac units on the same network.
+answers nothing at all — no `mtxrWlAp` rows — or it answers with the *local*
+configuration nobody is being served by: the factory SSID and zero clients, while
+its real clients are on the controller. Both were observed on cAP ac units on the
+same network.
 
 That zero is not a measurement, so netviz does not report it. Such a radio comes
 back as `unknown` rather than `0`, its faceplate block is blue rather than green,
 and the tooltip says the clients are counted on the controller. A zero there
 would paint an idle radio on an access point carrying eighteen clients.
 
-The sign of it is arithmetic: more radio interfaces up than rows in `mtxrWlAp`
-means a controller created the extra ones. A device serving its own radios has
-one row per radio.
+The radios still get drawn, though, because they are the access point's own
+hardware and they are transmitting. Which of them are real comes from the MAC
+address: bit 1 of the first octet is IEEE's locally-administered flag, clear on
+an address burned into a NIC and set on one a driver invented. A provisioned cAP
+ac reports six radio interfaces up; two read `0x48` and four read `0x4a`, so two
+of them are the hardware and the rest were created by the controller. With no
+`mtxrWlAp` row there is no frequency and therefore no band, so those blocks carry
+the interface name — `wlan1`, `wlan2` — rather than claiming one.
+
+Where a device does not report interface addresses at all, the fallback is
+arithmetic: more radio interfaces up than rows in `mtxrWlAp` means a controller
+created the extra ones. It cannot say *which* are real, so it only decides
+whether to trust the client counts.
 
 Where those clients actually are is the controller, under its own dynamic
 interfaces — and CAPsMAN names them after the access point and the band, so

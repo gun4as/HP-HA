@@ -80,6 +80,7 @@ OID_VLAN_EGRESS = "1.3.6.1.2.1.17.7.1.4.3.1.2"
 OID_VLAN_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"
 
 OID_IF_TYPE = "1.3.6.1.2.1.2.2.1.3"
+OID_IF_PHYS_ADDR = "1.3.6.1.2.1.2.2.1.6"
 
 # --- system ---
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
@@ -186,6 +187,28 @@ def _as_int(value, default: int | None = None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _burned_in(raw) -> bool | None:
+    """Whether a MAC address was set in hardware rather than by software.
+
+    Bit 1 of the first octet is IEEE's locally-administered flag: clear on an
+    address burned into a NIC, set on one a driver invented. RouterOS follows it,
+    so a radio interface a controller created reads 0x4a where the physical one
+    it hangs off reads 0x48 - which is how a provisioned access point can be
+    asked which of its six radios are real. None when the address is missing.
+    """
+    if raw is None:
+        return None
+    # An address arrives as six raw octets, not as text: str() on a pysnmp
+    # OctetString hands back the bytes decoded as characters, and 0x48 comes out
+    # as "H". Only the first octet matters, and only one bit of it.
+    if isinstance(raw, (bytes, bytearray)):
+        return not raw[0] & 0x02 if raw else None
+    digits = re.sub(r"[^0-9a-fA-F]", "", str(raw).removeprefix("0x").strip())
+    if len(digits) < 2:
+        return None
+    return not int(digits[:2], 16) & 0x02
 
 
 def _band_of(frequency: int | None) -> str | None:
@@ -520,7 +543,8 @@ class SnmpClient:
         local_signals = (
             await self.walk(source.local_signal_oid) if source.local_signal_oid else {}
         )
-        if not registrations and not local and not local_signals:
+        physical, virtual = await self._radio_interfaces(oper or {})
+        if not registrations and not local and not local_signals and not physical:
             return {}
         signals = await self.walk(source.registration_signal_oid)
 
@@ -573,19 +597,36 @@ class SnmpClient:
             bucket["signal_min"] = min(found) if found else None
             bucket["signal_max"] = max(found) if found else None
 
-        # A CAPsMAN-managed radio still answers mtxrWlAp, but with the local
-        # configuration nobody is using - default SSID, zero clients - while the
-        # clients themselves are attributed to the controller. More radio
-        # interfaces up than rows in mtxrWlAp is the sign of those extra
-        # controller-created interfaces, and it holds across every device probed:
-        # a standalone AP has one of each, a managed one has four to six spare.
-        radio_count = sum(
-            1
-            for index, kind in (await self.walk(OID_IF_TYPE)).items()
-            if _as_int(kind) == profiles.IF_TYPE_WIFI and _as_int(oper.get(index)) == 1
-        )
-        managed = bool(local) and radio_count > len(local)
+        # An interface a controller created is the sign that this device's own
+        # mtxrWlAp rows describe a local configuration nobody is being served by:
+        # factory SSID, zero clients, while the clients are counted on the
+        # controller. Where a MAC address is unavailable, fall back to counting -
+        # more radios up than rows in mtxrWlAp means the same thing, just less
+        # directly, and a device that answers neither is left alone.
+        if physical or virtual:
+            managed = bool(virtual)
+        else:
+            managed = bool(local) and len(await self._radios_up(oper)) > len(local)
         self._merge_local_radios(names, by_radio, local, oper, managed)
+
+        # A fully provisioned access point has no mtxrWlAp row at all, so nothing
+        # above put its radios anywhere. They are transmitting and worth drawing;
+        # only the client count is somebody else's to report. Without a frequency
+        # there is no band either, so these carry the interface name instead.
+        for ifindex, name in physical.items():
+            radio = by_radio.setdefault(
+                ifindex,
+                {
+                    "name": name,
+                    "clients": None if managed else 0,
+                    "signal_avg": None,
+                    "signal_min": None,
+                    "signal_max": None,
+                },
+            )
+            radio.setdefault("up", True)
+            radio.setdefault("managed", managed)
+            radio["local"] = True
 
         return {
             # Counted from registrations, never from a radio's own tally, so a
@@ -627,6 +668,37 @@ class SnmpClient:
             for index, raw in ssids.items()
         }
 
+    async def _radios_up(self, oper: dict) -> dict[str, str]:
+        """ifIndex to name for every radio interface that is running."""
+        types = await self.walk(OID_IF_TYPE)
+        names = await self.walk(OID_IF_NAME)
+        return {
+            index: str(names.get(index, "")).strip() or f"if{index}"
+            for index, kind in types.items()
+            if _as_int(kind) == profiles.IF_TYPE_WIFI
+            and _as_int(oper.get(index)) == 1
+        }
+
+    async def _radio_interfaces(self, oper: dict) -> tuple[dict, dict]:
+        """Running radios split into the device's own and a controller's.
+
+        Both dictionaries are empty when the device does not report interface
+        MAC addresses; the caller then has nothing to split on and says so
+        rather than guessing which of six radios are real.
+        """
+        up = await self._radios_up(oper)
+        if not up:
+            return {}, {}
+        macs = await self.walk(OID_IF_PHYS_ADDR, raw_bytes=True)
+        physical, virtual = {}, {}
+        for index, name in up.items():
+            match _burned_in(macs.get(index)):
+                case True:
+                    physical[index] = name
+                case False:
+                    virtual[index] = name
+        return physical, virtual
+
     def _merge_local_radios(
         self,
         names: dict,
@@ -657,6 +729,9 @@ class SnmpClient:
             # "up with nobody attached" is a different thing from "not running".
             radio["up"] = _as_int(oper.get(ifindex)) == 1
             radio["managed"] = managed
+            # This device owns the radio, as against the ones a controller
+            # reports on behalf of the access points it manages.
+            radio["local"] = True
             # Counting registrations is exact and per-client; the radio's own
             # tally is the fallback for when no registration table answered.
             if not radio["clients"]:

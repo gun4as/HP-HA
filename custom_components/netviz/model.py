@@ -163,14 +163,16 @@ def radio_slots(radios: dict, x: int, y: int) -> list[dict]:
 
     A radio is not a socket on a front panel, but the card is a summary of what
     the device is doing rather than a photograph, and on an access point the
-    radios are the interesting half. Only locally served radios get a block -
+    radios are the interesting half. Only the device's own radios get a block -
     a controller reports a radio for every managed AP, and those belong to the
-    other device's faceplate, not to this one.
+    other device's faceplate, not to this one. A radio a controller provisions
+    is still the access point's own hardware, so it gets a block whether or not
+    the device will say anything about the clients on it.
     """
     slots = []
     for offset, (ifindex, radio) in enumerate(
         sorted(
-            ((i, r) for i, r in radios.items() if "ssid" in r),
+            ((i, r) for i, r in radios.items() if r.get("local")),
             key=lambda kv: (kv[1].get("frequency") or 0, int(kv[0])),
         )
     ):

@@ -283,7 +283,7 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
         # its faceplate, so it is on by default. A controller reports one per
         # managed access point, which is a long list of somebody else's radios.
         radio = coordinator.wireless.get("radios", {}).get(ifindex, {})
-        self._attr_entity_registry_enabled_default = "ssid" in radio
+        self._attr_entity_registry_enabled_default = bool(radio.get("local"))
         # Keyed by ifIndex rather than by name: a CAPsMAN interface is named
         # after the access point and the band, and renaming either should not
         # orphan the history.
@@ -361,6 +361,16 @@ class NetvizSystemSensor(NetvizEntity, SensorEntity):
     @property
     def native_value(self):
         return self.entity_description.value_fn(self.coordinator.system)
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        # The device total is the only honest wireless figure on a controller:
+        # its own radios are provisioned and report nothing, while the clients
+        # sit on interfaces that belong to other access points' faceplates. The
+        # card looks entities up by port and metric, so it needs those here.
+        if self.entity_description.key != "wireless_clients":
+            return None
+        return {"port": "system", "metric": "wireless_clients"}
 
 
 class NetvizFaceplateSensor(NetvizEntity, SensorEntity):

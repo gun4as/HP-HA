@@ -57,8 +57,8 @@ RB2011UiAS, RB951G, CRS309-1G-8S+ un CRS112-8G-4S.
   iekārtu klases īpašība.
 - **Bezvadu daļai vajag kontrolieri.** Pārvaldīta AP nespēj saskaitīt klientus uz
   saviem radio — tā atbild vai nu neko, vai savu neizmantoto vietējo
-  konfigurāciju — tāpēc netviz tos radio atzīmē kā pārvaldītus un skaitu ziņo kā
-  nezināmu. Norādi netviz arī uz CAPsMAN kontrolieri, un visas AP ir nosegtas.
+  konfigurāciju — tāpēc netviz radio parāda, bet skaitu ziņo kā nezināmu. Norādi
+  netviz arī uz CAPsMAN kontrolieri, un visas AP ir nosegtas.
 
 ## Instalācija caur HACS
 
@@ -297,9 +297,10 @@ Vairāk nekā nevajag — ne HA instalācijas, ne tīkla. `snmp.py`, `model.py` 
 `SnmpClient` strādā ar `walk()` un `get_many()`, kas baroti no ierakstīta
 snapshot'a. Viss virs tiem ir ražošanas koda ceļš.
 
-Seši snapshot'i: JL357A, MikroTik RB2011, CRS309 switch, atsevišķa AP, CAPsMAN
-kontrolieris un AP, ko tas kontrolieris pārvalda. Tie atšķiras noderīgi, un katra
-no zemāk minētajām atšķirībām deva nepareizu atbildi, kas izskatījās pareiza, līdz
+Septiņi snapshot'i: JL357A, MikroTik RB2011, CRS309 switch, atsevišķa AP, CAPsMAN
+kontrolieris un divas AP, ko tas kontrolieris pārvalda — viena, kas par saviem
+radio ziņo mazliet, un otra, kas neziņo neko. Tie atšķiras noderīgi, un katra no
+zemāk minētajām atšķirībām deva nepareizu atbildi, kas izskatījās pareiza, līdz
 tests to pieķēra:
 
 - RB2011 atstāj Q-BRIDGE egress tabulu tukšu, aizpildot `dot1qPvid`, un tāpēc
@@ -317,6 +318,9 @@ tests to pieķēra:
 - pārvaldīta AP ziņo sešus radio `up`, bet `mtxrWlAp` ir tikai divas rindas, abām
   rūpnīcas SSID un nulle klientu — un tāpēc netviz zīmēja divus dīkstāves radio uz
   iekārtas, kas apkalpo astoņpadsmit klientus
+- tā blakus ziņo sešus radio `up` un nevienu rindu, tāpēc netviz nezīmēja nekādu
+  bezvadu daļu uz AP, kurai WiFi bija ieslēgts — tikai *locally administered* bits
+  katra interfeisa MAC adresē pasaka, kuri divi ir dzelzs
 
 Testi nekad neaiztiek dzelzi. Snapshot ņem divos soļos, un otrais ir obligāts:
 
@@ -339,6 +343,7 @@ Standarta MIB, lasīti uz katras iekārtas:
 |---|---|---|
 | ifName / ifAlias | `1.3.6.1.2.1.31.1.1.1.1` / `.18` | IF-MIB |
 | ifType — kā atrod fiziskos portus | `1.3.6.1.2.1.2.2.1.3` | IF-MIB |
+| ifPhysAddress — īsts radio pret kontroliera izveidotu | `1.3.6.1.2.1.2.2.1.6` | IF-MIB |
 | ifOperStatus / ifAdminStatus | `1.3.6.1.2.1.2.2.1.8` / `.7` | IF-MIB |
 | ifHighSpeed | `1.3.6.1.2.1.31.1.1.1.15` | IF-MIB |
 | ifHCInOctets / ifHCOutOctets | `1.3.6.1.2.1.31.1.1.1.6` / `.10` | IF-MIB |
@@ -397,18 +402,28 @@ vērts zināt, ja iekārta neziņo bezvadu daļu, kur to gaidīji.
 ### Pārvaldīta AP nezina savu klientu skaitu
 
 Ja prasa CAPsMAN pārvaldītai AP tieši, notiek viens no diviem. Vai nu tā neatbild
-neko — `mtxrWlAp` nav rindu, un netviz nezīmē nevienu radio — vai atbild ar
-*vietējo* konfigurāciju, ko neviens neizmanto: rūpnīcas SSID un nulle klientu, kaut
-patiesie klienti ir uz kontroliera. Abi gadījumi novēroti uz cAP ac vienā tīklā.
+neko — `mtxrWlAp` nav nevienas rindas — vai atbild ar *vietējo* konfigurāciju, ko
+neviens neizmanto: rūpnīcas SSID un nulle klientu, kaut patiesie klienti ir uz
+kontroliera. Abi gadījumi novēroti uz cAP ac vienā tīklā.
 
 Tā nulle nav mērījums, tāpēc netviz to neziņo. Tāds radio atgriežas kā `unknown`,
 nevis `0`, tā bloks priekšpanelī ir zils, nevis zaļš, un tooltip pasaka, ka
 klienti tiek skaitīti uz kontroliera. Nulle tur uzzīmētu dīkstāves radio uz AP,
 kas nes astoņpadsmit klientus.
 
-Pazīme ir aritmētiska: ja `up` radio interfeisu ir vairāk nekā rindu `mtxrWlAp`,
-tad liekos ir izveidojis kontrolieris. Iekārtai, kas radio apkalpo pati, ir viena
-rinda uz katru radio.
+Radio tomēr tiek uzzīmēti, jo tie ir tās AP paša dzelzs un tie raida. Kurš no
+tiem ir īsts, pasaka MAC adrese: pirmā okteta 1. bits ir IEEE *locally
+administered* karodziņš — nulle adresei, kas iededzināta NIC, un viens tādai, ko
+izdomājis draiveris. Pārvaldīta cAP ac ziņo sešus radio interfeisus `up`; divi
+sākas ar `0x48` un četri ar `0x4a`, tāpēc divi no tiem ir dzelzs, bet pārējos
+izveidoja kontrolieris. Bez `mtxrWlAp` rindas nav frekvences un tātad nav joslas,
+tāpēc tie bloki nes interfeisa nosaukumu — `wlan1`, `wlan2` — nevis izliekas
+zināt.
+
+Ja iekārta interfeisu adreses neziņo vispār, atkāpe ir aritmētiska: ja `up` radio
+interfeisu ir vairāk nekā rindu `mtxrWlAp`, tad liekos ir izveidojis kontrolieris.
+Tā nevar pateikt, *kuri* ir īsti, tāpēc izšķir tikai to, vai ticēt klientu
+skaitiem.
 
 Klienti patiesībā ir uz kontroliera, zem tā dinamiskajiem interfeisiem — un
 CAPsMAN tos nosauc pēc AP un joslas, tāpēc `24Ghz-<ap nosaukums>-1` uz kontroliera

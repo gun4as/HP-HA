@@ -18,6 +18,7 @@ Deliberately preserved:
 """
 
 import argparse
+import base64
 import json
 import re
 import sys
@@ -25,6 +26,7 @@ import sys
 OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
 OID_IF_NAME = "1.3.6.1.2.1.31.1.1.1.1"
+OID_IF_PHYS_ADDR = "1.3.6.1.2.1.2.2.1.6"
 OID_IF_ALIAS = "1.3.6.1.2.1.31.1.1.1.18"
 OID_IF_DESCR = "1.3.6.1.2.1.2.2.1.2"
 OID_ENT_SERIAL = "1.3.6.1.2.1.47.1.1.1.1.11"
@@ -96,6 +98,25 @@ def is_clean_ifname(value: str, index: str) -> bool:
 def sanitize(snap: dict) -> tuple[dict, list[str]]:
     log = []
     out = json.loads(json.dumps(snap))  # deep copy
+
+    # A MAC address identifies a unit and its manufacturer, so none of the real
+    # one survives. The single bit netviz reads does: IEEE's locally-administered
+    # flag, clear on hardware and set on an address a driver invented, which is
+    # what tells a provisioned access point's own radios from a controller's.
+    # Nothing else about the address is preserved - not the vendor prefix, and
+    # not the fact that a virtual radio's address derives from its master's.
+    phys = out.get("walks", {}).get(OID_IF_PHYS_ADDR)
+    if phys:
+        changed = 0
+        for order, idx in enumerate(sorted(phys, key=lambda k: int(k)), 1):
+            octets = base64.b64decode(phys[idx])
+            if not octets:
+                continue
+            phys[idx] = base64.b64encode(
+                bytes([octets[0] & 0x03, 0x00, 0x5E, 0x00, order >> 8, order & 0xFF])
+            ).decode()
+            changed += 1
+        log.append(f"ifPhysAddress: {changed} addresses replaced, U/L bit kept")
 
     if out.get("host"):
         log.append(f"host: {out['host']!r} -> {FAKE_HOST!r}")
