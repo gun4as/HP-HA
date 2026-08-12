@@ -332,6 +332,11 @@ radio, katram atribūtos vidējais, minimālais un maksimālais signāls. Radio
 sensori pēc noklusējuma ir izslēgti, jo kontrolieris ar vairākām AP tādu uztaisa
 daudz.
 
+Parādās arī radio, ko iekārta apkalpo pati — atsevišķa AP, vai kontroliera paša
+radio blakus tiem, ko tas pārvalda — un tiem ir SSID, trokšņu grīda un pārraides
+kvalitāte. Tas strādā tikai tad, kad radio patiešām ir `up`: `mtxrWlAp` ir tukša
+radio, kas ir konfigurēts, bet nokritis, un tas ir noderīgs veids, kā to pamanīt.
+
 **Apzināti tikai agregāti.** Reģistrācijas tabula ir indeksēta pēc klienta MAC
 adreses. Taisīt no tām entītijas nozīmētu izsekot visus mājā, Home Assistant tam
 jau ir sava MikroTik integrācija, un šī nav tā. Ir tests, kas apgalvo, ka neviena

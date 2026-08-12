@@ -364,8 +364,11 @@ async def test_signal_statistics_are_consistent(capsman):
         *data["wireless"]["ssids"].values(),
         *data["wireless"]["radios"].values(),
     ]
-    assert buckets
-    for bucket in buckets:
+    # A radio the device serves itself has no per-client registrations, so it has
+    # no signal statistics either - None is the correct answer there.
+    measured = [b for b in buckets if b["signal_avg"] is not None]
+    assert measured, "nothing in the fixture had a client to measure"
+    for bucket in measured:
         assert bucket["signal_min"] <= bucket["signal_avg"] <= bucket["signal_max"]
         assert -100 < bucket["signal_min"] and bucket["signal_max"] < 0
 
@@ -468,3 +471,39 @@ async def test_delivering_with_zero_power_reports_unknown(rb2011):
     result = data["ports"][poe_port["id"]]
     assert result["poe_status"] == "delivering"
     assert result["poe_power"] is None
+
+
+async def test_locally_served_radios_are_included(capsman):
+    """A controller serves a couple of radios itself, and mtxrWlAp reports them.
+
+    Those four columns were declared in the profile and never read - this is the
+    fixture that proves they carry SSID, noise floor and transmit quality.
+    """
+    from conftest import profiles
+
+    wireless = profiles.ROUTEROS.wireless
+    ap_ssids = capsman.walk(wireless.ap_ssid_oid)
+    assert ap_ssids, "fixture has no locally served radio"
+
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    radios = data["wireless"]["radios"]
+
+    for index in ap_ssids:
+        ifindex = index.split(".")[0]
+        radio = radios[ifindex]
+        assert radio["ssid"], f"radio {ifindex} has no SSID"
+        assert -120 < radio["noise_floor"] < 0, "noise floor is dBm, negative"
+        assert 0 <= radio["quality"] <= 100, "CCQ is a percentage"
+
+    # radios attributed from the controller's registrations carry no such fields
+    from_registrations = [r for r in radios.values() if "ssid" not in r]
+    assert from_registrations, "fixture should have both kinds of radio"
+
+
+async def test_a_controller_counts_registrations_over_the_radio_tally(capsman):
+    """Both sources report clients; the per-client one is exact."""
+    data = await FixtureClient(capsman).poll(capsman.physical_ports())
+    total = sum(
+        r["clients"] for r in data["wireless"]["radios"].values() if "ssid" not in r
+    )
+    assert total == data["wireless"]["clients"]

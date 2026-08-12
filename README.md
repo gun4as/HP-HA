@@ -356,6 +356,12 @@ access point, each carrying average, minimum and maximum signal as attributes.
 The per-radio sensors are disabled by default, because a controller with several
 APs produces a lot of them.
 
+Radios a device serves itself — a standalone access point, or the controller's
+own radios alongside the ones it manages — also appear, and carry their SSID,
+noise floor and transmit quality. That only works while the radio is actually up:
+`mtxrWlAp` is empty on a radio that is configured but down, which is a useful way
+to notice one that is not running.
+
 **Aggregates only, deliberately.** The registration table is keyed by client MAC
 address. Turning those into entities would be tracking everyone in the building,
 Home Assistant already has a MikroTik integration that does device tracking, and

@@ -527,6 +527,11 @@ class SnmpClient:
             bucket["signal_min"] = min(found) if found else None
             bucket["signal_max"] = max(found) if found else None
 
+        # Radios the device serves itself, rather than through a controller.
+        # mtxrWlAp is populated only for a radio that is actually up in AP mode,
+        # which makes its presence the test for "this radio is serving".
+        await self._local_radios(names, by_radio)
+
         return {
             "clients": len(registrations),
             "ssids": dict(sorted(by_ssid.items())),
@@ -534,6 +539,44 @@ class SnmpClient:
                 sorted(by_radio.items(), key=lambda kv: kv[1]["name"])
             ),
         }
+
+    async def _local_radios(self, names: dict, by_radio: dict) -> None:
+        """Merge in the radios this device serves on its own.
+
+        A standalone access point has no controller to ask, and a CAPsMAN
+        controller usually serves a couple of radios itself alongside the ones it
+        manages. Both appear in mtxrWlAp, keyed by ifIndex, with the SSID, client
+        count, noise floor and transmit quality the radio reports for itself.
+        """
+        source = self.profile.wireless
+        if source is None or not source.ap_ssid_oid:
+            return
+        ssids = await self.walk(source.ap_ssid_oid)
+        if not ssids:
+            return
+        clients = await self.walk(source.ap_clients_oid) if source.ap_clients_oid else {}
+        noise = await self.walk(source.ap_noise_oid) if source.ap_noise_oid else {}
+        quality = await self.walk(source.ap_ccq_oid) if source.ap_ccq_oid else {}
+
+        for index, raw_ssid in ssids.items():
+            ifindex = index.split(".")[0]
+            radio = by_radio.setdefault(
+                ifindex,
+                {
+                    "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                    "clients": 0,
+                    "signal_avg": None,
+                    "signal_min": None,
+                    "signal_max": None,
+                },
+            )
+            radio["ssid"] = str(raw_ssid).strip() or None
+            radio["noise_floor"] = _as_int(noise.get(index))
+            radio["quality"] = _as_int(quality.get(index))
+            # A registration count from the controller is per-client and exact;
+            # fall back to the radio's own tally only when there is none.
+            if not radio["clients"]:
+                radio["clients"] = _as_int(clients.get(index), 0) or 0
 
     async def _storage(self, match: str) -> tuple[int | None, int | None]:
         """Free and used bytes from an hrStorage row, matched by description.

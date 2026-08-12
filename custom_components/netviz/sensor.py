@@ -292,12 +292,17 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         bucket = self._bucket
-        return {
+        attrs = {
             "interface": bucket.get("name"),
             "signal_avg": bucket.get("signal_avg"),
             "signal_min": bucket.get("signal_min"),
             "signal_max": bucket.get("signal_max"),
         }
+        # Only a radio the device serves itself reports these
+        for key in ("ssid", "noise_floor", "quality"):
+            if key in bucket:
+                attrs[key] = bucket[key]
+        return attrs
 
 
 class NetvizPortSensor(NetvizPortEntity, SensorEntity):
