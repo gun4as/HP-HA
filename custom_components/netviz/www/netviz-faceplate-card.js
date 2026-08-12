@@ -112,13 +112,18 @@ class NetvizFaceplateCard extends HTMLElement {
    */
   _entityMap() {
     const hass = this._hass;
-    const expected =
-      Object.keys(this._portNodes || {}).length +
-      Object.keys(this._radioNodes || {}).length;
+    // The specific nodes this faceplate draws, not how many keys came back. A
+    // count cannot tell a complete map from one that is missing a radio and has
+    // picked up the device-wide `system` key instead - it caches the gap and
+    // never looks again.
+    const wanted = [
+      ...Object.keys(this._portNodes || {}),
+      ...Object.keys(this._radioNodes || {}),
+    ];
     if (
       this._map &&
       this._mapSource === hass.entities &&
-      Object.keys(this._map).length >= expected
+      wanted.every((key) => this._map[key])
     ) {
       return this._map;
     }
@@ -135,9 +140,11 @@ class NetvizFaceplateCard extends HTMLElement {
       if (!map[port]) map[port] = {};
       map[port][metric] = entry.entity_id;
     }
-    // Never cache an empty or partial map: at startup some states may not have
-    // arrived yet, and then their attributes cannot be read.
-    if (Object.keys(map).length >= expected && expected > 0) {
+    // Never cache a partial map: at startup some states may not have arrived
+    // yet, and a node whose entity is disabled may be enabled later. Rescanning
+    // costs one pass over the registry per state change and is the cheaper
+    // mistake - caching a gap makes the card wrong until it is rebuilt.
+    if (wanted.length && wanted.every((key) => map[key])) {
       this._mapSource = hass.entities;
       this._map = map;
     }
@@ -545,4 +552,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.4 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.5 ", "background:#2ea3f2;color:#fff", "");
