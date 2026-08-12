@@ -507,3 +507,62 @@ async def test_a_controller_counts_registrations_over_the_radio_tally(capsman):
         r["clients"] for r in data["wireless"]["radios"].values() if "ssid" not in r
     )
     assert total == data["wireless"]["clients"]
+
+
+# ----------------------------------------------- a standalone AP, no controller
+
+
+async def test_standalone_ap_counts_its_own_clients(rb951):
+    """A radio in AP mode with no controller keeps its clients in mtxrWlRtab.
+
+    That table has no SSID column, so the SSID has to be attributed from
+    mtxrWlAp for the same interface. Reading only the CAPsMAN table - which is
+    what the first attempt did - meant such a device reported no wireless at all.
+    """
+    from conftest import profiles
+
+    wireless = profiles.ROUTEROS.wireless
+    assert rb951.walk(wireless.registration_ssid_oid) == {}, "not a controller"
+    local = rb951.walk(wireless.local_signal_oid)
+    assert local, "fixture lost its connected client"
+
+    data = await FixtureClient(rb951).poll(rb951.physical_ports())
+    result = data["wireless"]
+    assert result["clients"] == len(local)
+    assert data["system"]["wireless_clients"] == len(local)
+
+    ssid, bucket = next(iter(result["ssids"].items()))
+    assert ssid != "(unknown)", "SSID was not attributed from mtxrWlAp"
+    assert bucket["clients"] == len(local)
+    assert -100 < bucket["signal_avg"] < 0
+
+    radio = next(r for r in result["radios"].values() if r["clients"])
+    assert radio["ssid"] == ssid
+    assert radio["signal_avg"] == bucket["signal_avg"]
+    assert -120 < radio["noise_floor"] < 0
+    assert 0 <= radio["quality"] <= 100
+
+
+async def test_a_local_client_never_reaches_the_output_either(rb951):
+    """The local registration table is MAC-keyed too."""
+    import json
+    import re
+
+    data = await FixtureClient(rb951).poll(rb951.physical_ports())
+    blob = json.dumps(data["wireless"])
+    assert not re.search(r"(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}", blob)
+    assert not re.search(r"\b\d{1,3}(?:\.\d{1,3}){5}\b", blob)
+
+
+async def test_a_radio_in_ap_mode_appears_even_with_no_clients(capsman):
+    """mtxrWlAp is about configuration, not about traffic.
+
+    An earlier comment claimed the table only fills for a radio that is up. It
+    fills for one configured in AP mode; a radio in station mode has no row.
+    """
+    radios = (await FixtureClient(capsman).poll(capsman.physical_ports()))["wireless"]["radios"]
+    idle = [r for r in radios.values() if "ssid" in r and r["clients"] == 0]
+    assert idle, "fixture should have a configured radio with nothing attached"
+    for radio in idle:
+        assert radio["ssid"]
+        assert radio["noise_floor"] is not None

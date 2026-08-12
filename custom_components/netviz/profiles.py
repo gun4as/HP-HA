@@ -117,6 +117,9 @@ class WirelessSource:
 
     registration_ssid_oid: str
     registration_signal_oid: str
+    # mtxrWlRtab, the same idea for a radio the device serves itself. It carries
+    # no SSID column - that comes from mtxrWlAp for the same ifIndex.
+    local_signal_oid: str | None = None
     ap_ssid_oid: str | None = None
     ap_clients_oid: str | None = None
     ap_noise_oid: str | None = None
@@ -192,6 +195,7 @@ ROUTEROS = Profile(
     wireless=WirelessSource(
         registration_ssid_oid="1.3.6.1.4.1.14988.1.1.1.5.1.12",
         registration_signal_oid="1.3.6.1.4.1.14988.1.1.1.5.1.11",
+        local_signal_oid="1.3.6.1.4.1.14988.1.1.1.2.1.3",
         ap_ssid_oid="1.3.6.1.4.1.14988.1.1.1.3.1.4",
         ap_clients_oid="1.3.6.1.4.1.14988.1.1.1.3.1.6",
         ap_noise_oid="1.3.6.1.4.1.14988.1.1.1.3.1.9",

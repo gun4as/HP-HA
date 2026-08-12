@@ -79,6 +79,10 @@ WALK_OIDS = {
     "1.3.6.1.4.1.14988.1.1.1.3.1.8": ("mtxrWlApBand", False),
     "1.3.6.1.4.1.14988.1.1.1.3.1.9": ("mtxrWlApNoiseFloor", False),
     "1.3.6.1.4.1.14988.1.1.1.3.1.10": ("mtxrWlApOverallCCQ", False),
+    # mtxrWlRtab: per-client signal on a standalone AP, the local counterpart of
+    # the CAPsMAN registration table
+    "1.3.6.1.4.1.14988.1.1.1.2.1.3": ("mtxrWlRtabStrength", False),
+    "1.3.6.1.4.1.14988.1.1.1.2.1.8": ("mtxrWlRtabTxRate", False),
     "1.3.6.1.4.1.14988.1.1.1.5.1.11": ("mtxrWlCMRegSignal", False),
     "1.3.6.1.4.1.14988.1.1.1.5.1.12": ("mtxrWlCMRegSsid", False),
     "1.3.6.1.4.1.14988.1.1.1.5.1.8": ("mtxrWlCMRegTxRate", False),

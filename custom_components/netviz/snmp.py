@@ -495,7 +495,14 @@ class SnmpClient:
         if source is None:
             return {}
         registrations = await self.walk(source.registration_ssid_oid)
-        if not registrations:
+        # mtxrWlAp says which radios this device serves itself, and for a local
+        # client the SSID has to come from there - the local registration table
+        # has no SSID column of its own.
+        local = await self._local_ap_info()
+        local_signals = (
+            await self.walk(source.local_signal_oid) if source.local_signal_oid else {}
+        )
+        if not registrations and not local and not local_signals:
             return {}
         signals = await self.walk(source.registration_signal_oid)
 
@@ -521,45 +528,75 @@ class SnmpClient:
                 if signal is not None:
                     bucket["_signals"].append(signal)
 
+        # Clients on a radio this device serves itself. Same shape, except the
+        # SSID is looked up per interface rather than carried per client.
+        for index, raw_signal in local_signals.items():
+            ifindex = index.split(".")[-1]
+            ssid = (local.get(ifindex) or {}).get("ssid") or "(unknown)"
+            signal = _as_int(raw_signal)
+            for bucket in (
+                by_ssid.setdefault(ssid, {"clients": 0, "_signals": []}),
+                by_radio.setdefault(
+                    ifindex,
+                    {
+                        "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                        "clients": 0,
+                        "_signals": [],
+                    },
+                ),
+            ):
+                bucket["clients"] += 1
+                if signal is not None:
+                    bucket["_signals"].append(signal)
+
         for bucket in (*by_ssid.values(), *by_radio.values()):
             found = bucket.pop("_signals")
             bucket["signal_avg"] = round(sum(found) / len(found)) if found else None
             bucket["signal_min"] = min(found) if found else None
             bucket["signal_max"] = max(found) if found else None
 
-        # Radios the device serves itself, rather than through a controller.
-        # mtxrWlAp is populated only for a radio that is actually up in AP mode,
-        # which makes its presence the test for "this radio is serving".
-        await self._local_radios(names, by_radio)
+        self._merge_local_radios(names, by_radio, local)
 
         return {
-            "clients": len(registrations),
+            "clients": len(registrations) + len(local_signals),
             "ssids": dict(sorted(by_ssid.items())),
             "radios": dict(
                 sorted(by_radio.items(), key=lambda kv: kv[1]["name"])
             ),
         }
 
-    async def _local_radios(self, names: dict, by_radio: dict) -> None:
-        """Merge in the radios this device serves on its own.
+    async def _local_ap_info(self) -> dict[str, dict]:
+        """What each radio this device serves itself reports about itself.
 
-        A standalone access point has no controller to ask, and a CAPsMAN
+        mtxrWlAp is populated for a radio configured in AP mode, whether or not
+        it is currently up; a radio in station mode has no row at all. A CAPsMAN
         controller usually serves a couple of radios itself alongside the ones it
-        manages. Both appear in mtxrWlAp, keyed by ifIndex, with the SSID, client
-        count, noise floor and transmit quality the radio reports for itself.
+        manages, and those appear here too.
         """
         source = self.profile.wireless
         if source is None or not source.ap_ssid_oid:
-            return
+            return {}
         ssids = await self.walk(source.ap_ssid_oid)
         if not ssids:
-            return
+            return {}
         clients = await self.walk(source.ap_clients_oid) if source.ap_clients_oid else {}
         noise = await self.walk(source.ap_noise_oid) if source.ap_noise_oid else {}
         quality = await self.walk(source.ap_ccq_oid) if source.ap_ccq_oid else {}
+        return {
+            index.split(".")[0]: {
+                "ssid": str(raw).strip() or None,
+                "clients": _as_int(clients.get(index), 0) or 0,
+                "noise_floor": _as_int(noise.get(index)),
+                "quality": _as_int(quality.get(index)),
+            }
+            for index, raw in ssids.items()
+        }
 
-        for index, raw_ssid in ssids.items():
-            ifindex = index.split(".")[0]
+    def _merge_local_radios(
+        self, names: dict, by_radio: dict, local: dict[str, dict]
+    ) -> None:
+        """Attach what a locally served radio says about itself."""
+        for ifindex, info in local.items():
             radio = by_radio.setdefault(
                 ifindex,
                 {
@@ -570,13 +607,13 @@ class SnmpClient:
                     "signal_max": None,
                 },
             )
-            radio["ssid"] = str(raw_ssid).strip() or None
-            radio["noise_floor"] = _as_int(noise.get(index))
-            radio["quality"] = _as_int(quality.get(index))
-            # A registration count from the controller is per-client and exact;
-            # fall back to the radio's own tally only when there is none.
+            radio["ssid"] = info["ssid"]
+            radio["noise_floor"] = info["noise_floor"]
+            radio["quality"] = info["quality"]
+            # Counting registrations is exact and per-client; the radio's own
+            # tally is the fallback for when no registration table answered.
             if not radio["clients"]:
-                radio["clients"] = _as_int(clients.get(index), 0) or 0
+                radio["clients"] = info["clients"]
 
     async def _storage(self, match: str) -> tuple[int | None, int | None]:
         """Free and used bytes from an hrStorage row, matched by description.

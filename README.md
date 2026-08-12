@@ -358,9 +358,13 @@ APs produces a lot of them.
 
 Radios a device serves itself — a standalone access point, or the controller's
 own radios alongside the ones it manages — also appear, and carry their SSID,
-noise floor and transmit quality. That only works while the radio is actually up:
-`mtxrWlAp` is empty on a radio that is configured but down, which is a useful way
-to notice one that is not running.
+noise floor and transmit quality. A standalone AP keeps its clients in a separate
+table with no SSID column, so the SSID is attributed per interface; the resulting
+per-SSID and per-radio numbers look the same either way.
+
+`mtxrWlAp` is populated for a radio configured in AP mode, whether or not it is
+currently up. A radio left in station mode has no row at all, which is worth
+knowing if a device reports no wireless when you expected some.
 
 **Aggregates only, deliberately.** The registration table is keyed by client MAC
 address. Turning those into entities would be tracking everyone in the building,

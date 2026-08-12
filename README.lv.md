@@ -334,8 +334,13 @@ daudz.
 
 Parādās arī radio, ko iekārta apkalpo pati — atsevišķa AP, vai kontroliera paša
 radio blakus tiem, ko tas pārvalda — un tiem ir SSID, trokšņu grīda un pārraides
-kvalitāte. Tas strādā tikai tad, kad radio patiešām ir `up`: `mtxrWlAp` ir tukša
-radio, kas ir konfigurēts, bet nokritis, un tas ir noderīgs veids, kā to pamanīt.
+kvalitāte. Atsevišķa AP savus klientus glabā citā tabulā, kurai nav SSID
+kolonnas, tāpēc SSID tiek piešķirts pēc interfeisa; rezultāts pa SSID un pa radio
+izskatās vienādi abos gadījumos.
+
+`mtxrWlAp` ir aizpildīta radio, kas **konfigurēts** AP režīmā, neatkarīgi no tā,
+vai tas šobrīd ir `up`. Radio, kas atstāts station režīmā, tur nav vispār — to
+vērts zināt, ja iekārta neziņo bezvadu daļu, kur to gaidīji.
 
 **Apzināti tikai agregāti.** Reģistrācijas tabula ir indeksēta pēc klienta MAC
 adreses. Taisīt no tām entītijas nozīmētu izsekot visus mājā, Home Assistant tam

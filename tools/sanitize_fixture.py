@@ -47,9 +47,10 @@ OID_MTXR_POE_NAME = "1.3.6.1.4.1.14988.1.1.15.1.1.2"
 OID_HR_STORAGE_DESCR = "1.3.6.1.2.1.25.2.3.1.3"
 OID_WL_AP_SSID = "1.3.6.1.4.1.14988.1.1.1.3.1.4"
 OID_WL_REG_SSID = "1.3.6.1.4.1.14988.1.1.1.5.1.12"
-# The registration table is indexed by the client MAC, six decimal octets
+# Both registration tables are indexed by the client MAC, six decimal octets
 # followed by the interface index. The values are harmless, the index is not.
-OID_WL_REG_PREFIX = "1.3.6.1.4.1.14988.1.1.1.5.1"
+# Table 2 is the local one on a standalone AP, table 5 the CAPsMAN one.
+OID_WL_REG_PREFIXES = ("1.3.6.1.4.1.14988.1.1.1.2.1", "1.3.6.1.4.1.14988.1.1.1.5.1")
 
 # Storage rows that name generic hardware. Anything else - a USB stick, say -
 # tends to carry a model and a serial in its description.
@@ -215,7 +216,7 @@ def sanitize(snap: dict) -> tuple[dict, list[str]]:
     # keep their shape - six octets plus an interface index - without the MACs.
     macs: dict[str, str] = {}
     for oid, table in list(walks.items()):
-        if not oid.startswith(OID_WL_REG_PREFIX):
+        if not oid.startswith(OID_WL_REG_PREFIXES):
             continue
         rekeyed = {}
         for idx, value in table.items():
