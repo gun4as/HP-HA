@@ -144,3 +144,16 @@ def rb951() -> Snapshot:
 def capsman() -> Snapshot:
     """MikroTik hAP ac3 acting as CAPsMAN controller: 48 client registrations."""
     return Snapshot(FIXTURES / "capsman.json")
+
+
+@pytest.fixture
+def capac() -> Snapshot:
+    """MikroTik cAP ac provisioned by a controller.
+
+    Six radio interfaces up, but only two rows in mtxrWlAp and both describing
+    the local configuration nobody is served by: default SSID, zero clients.
+    Its real clients are on the controller, under interfaces named after this
+    access point. The device that made netviz stop reporting a managed radio's
+    client count as zero.
+    """
+    return Snapshot(FIXTURES / "capac.json")

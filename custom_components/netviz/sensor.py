@@ -297,7 +297,9 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return self._bucket.get("clients", 0)
+        # None where a controller manages the radio: its own tally counts the
+        # local SSID nobody is using, and zero would be a false measurement.
+        return self._bucket.get("clients")
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -313,7 +315,15 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
             "signal_max": bucket.get("signal_max"),
         }
         # Only a radio the device serves itself reports these
-        for key in ("ssid", "noise_floor", "quality", "band", "frequency", "up"):
+        for key in (
+            "ssid",
+            "noise_floor",
+            "quality",
+            "band",
+            "frequency",
+            "up",
+            "managed",
+        ):
             if key in bucket:
                 attrs[key] = bucket[key]
         return attrs

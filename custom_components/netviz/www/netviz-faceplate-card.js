@@ -31,6 +31,9 @@ const LABEL_MIN_PX = 5.5;
 const RADIO_BUSY = "#3ec46d";
 const RADIO_IDLE = "#2e7d4f";
 const RADIO_DOWN = "var(--disabled-color, #6f7378)";
+// A controller manages this radio: it is transmitting, but the device cannot say
+// how many clients are on it. Idle green would be a lie, grey doubly so.
+const RADIO_MANAGED = "#2e6ea3";
 
 const LINK_COLORS = {
   down: "var(--disabled-color, #6f7378)",
@@ -306,6 +309,9 @@ class NetvizFaceplateCard extends HTMLElement {
            </span>
            <span style="display:inline-flex;align-items:center;gap:5px">
              <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_IDLE}"></span>idle
+           </span>
+           <span style="display:inline-flex;align-items:center;gap:5px">
+             <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_MANAGED}"></span>managed
            </span>`
         : "");
     wrap.appendChild(legend);
@@ -436,14 +442,19 @@ class NetvizFaceplateCard extends HTMLElement {
       const up = attrs.up !== false;
 
       let colour = RADIO_DOWN;
-      if (state && up) colour = clients > 0 ? RADIO_BUSY : RADIO_IDLE;
+      if (state && up) {
+        if (attrs.managed) colour = RADIO_MANAGED;
+        else colour = clients > 0 ? RADIO_BUSY : RADIO_IDLE;
+      }
       node.body.setAttribute("fill", colour);
       if (Number.isFinite(clients)) radioClients += clients;
 
       const lines = [attrs.interface || node.def.label];
       if (attrs.ssid) lines.push(attrs.ssid);
       lines.push(up ? "up" : "down");
-      if (Number.isFinite(clients)) {
+      if (attrs.managed) {
+        lines.push("managed by a controller - clients are counted there");
+      } else if (Number.isFinite(clients)) {
         lines.push(`${clients} client${clients === 1 ? "" : "s"}`);
       }
       if (attrs.signal_avg != null) lines.push(`avg ${attrs.signal_avg} dBm`);
@@ -496,4 +507,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.1 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.2 ", "background:#2ea3f2;color:#fff", "");

@@ -573,9 +573,23 @@ class SnmpClient:
             bucket["signal_min"] = min(found) if found else None
             bucket["signal_max"] = max(found) if found else None
 
-        self._merge_local_radios(names, by_radio, local, oper)
+        # A CAPsMAN-managed radio still answers mtxrWlAp, but with the local
+        # configuration nobody is using - default SSID, zero clients - while the
+        # clients themselves are attributed to the controller. More radio
+        # interfaces up than rows in mtxrWlAp is the sign of those extra
+        # controller-created interfaces, and it holds across every device probed:
+        # a standalone AP has one of each, a managed one has four to six spare.
+        radio_count = sum(
+            1
+            for index, kind in (await self.walk(OID_IF_TYPE)).items()
+            if _as_int(kind) == profiles.IF_TYPE_WIFI and _as_int(oper.get(index)) == 1
+        )
+        managed = bool(local) and radio_count > len(local)
+        self._merge_local_radios(names, by_radio, local, oper, managed)
 
         return {
+            # Counted from registrations, never from a radio's own tally, so a
+            # managed AP reporting nothing does not inflate or zero the total.
             "clients": len(registrations) + len(local_signals),
             "ssids": dict(sorted(by_ssid.items())),
             "radios": dict(
@@ -619,6 +633,7 @@ class SnmpClient:
         by_radio: dict,
         local: dict[str, dict],
         oper: dict | None = None,
+        managed: bool = False,
     ) -> None:
         """Attach what a locally served radio says about itself."""
         oper = oper or {}
@@ -641,10 +656,17 @@ class SnmpClient:
             # A radio configured in AP mode still has a row when it is down, and
             # "up with nobody attached" is a different thing from "not running".
             radio["up"] = _as_int(oper.get(ifindex)) == 1
+            radio["managed"] = managed
             # Counting registrations is exact and per-client; the radio's own
             # tally is the fallback for when no registration table answered.
             if not radio["clients"]:
-                radio["clients"] = info["clients"]
+                if managed:
+                    # Its own tally counts clients on the local SSID, which is
+                    # not the one being served. Zero here would read as "nobody
+                    # is connected" on a radio carrying a dozen clients.
+                    radio["clients"] = None
+                else:
+                    radio["clients"] = info["clients"]
 
     async def _storage(self, match: str) -> tuple[int | None, int | None]:
         """Free and used bytes from an hrStorage row, matched by description.

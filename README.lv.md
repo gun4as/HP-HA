@@ -55,9 +55,10 @@ RB2011UiAS, RB951G, CRS309-1G-8S+ un CRS112-8G-4S.
   trunk klusē, nevis min. Apstiprināts uz visām astoņām iekārtām, ieskaitot divus
   CRS switch'us ar bridge VLAN filtering — tātad tā ir ražotāja, nevis konkrētas
   iekārtu klases īpašība.
-- **Bezvadu daļai vajag kontrolieri.** Pārvaldīta AP par saviem radio neatbild
-  gandrīz neko, tāpēc, norādot netviz uz to, dabū portus un nekādu bezvadu daļu.
-  Norādi uz CAPsMAN kontrolieri, un tas sedz visas AP.
+- **Bezvadu daļai vajag kontrolieri.** Pārvaldīta AP nespēj saskaitīt klientus uz
+  saviem radio — tā atbild vai nu neko, vai savu neizmantoto vietējo
+  konfigurāciju — tāpēc netviz tos radio atzīmē kā pārvaldītus un skaitu ziņo kā
+  nezināmu. Norādi netviz arī uz CAPsMAN kontrolieri, un visas AP ir nosegtas.
 
 ## Instalācija caur HACS
 
@@ -198,8 +199,9 @@ tās pašas ierīces entītijām. Portus tā savāc pēc `port` un `metric` atri
 
 Priekšpanelī parādās arī radio — apaļoti bloki aiz portiem, ar joslas apzīmējumu
 `2.4G`, `5G`. Zaļš nozīmē, ka klienti ir pieslēgti, tumši zaļš — ka radio ir `up`,
-bet dīkstāvē, pelēks — ka tas nestrādā; tooltip ir SSID, klientu skaits, vidējais
-signāls, trokšņu grīda un pārraides kvalitāte. Bloku dabū tikai tie radio, ko
+bet dīkstāvē, zils — ka radio pārvalda kontrolieris un šī iekārta savus klientus
+saskaitīt nevar, pelēks — ka tas nestrādā; tooltip ir SSID, klientu skaits,
+vidējais signāls, trokšņu grīda un pārraides kvalitāte. Bloku dabū tikai tie radio, ko
 iekārta apkalpo pati: CAPsMAN kontrolieris ziņo vienu uz katru pārvaldīto AP, un
 tie pieder tās AP priekšpanelim, kurai tie ir.
 
@@ -295,9 +297,10 @@ Vairāk nekā nevajag — ne HA instalācijas, ne tīkla. `snmp.py`, `model.py` 
 `SnmpClient` strādā ar `walk()` un `get_many()`, kas baroti no ierakstīta
 snapshot'a. Viss virs tiem ir ražošanas koda ceļš.
 
-Pieci snapshot'i: JL357A, MikroTik RB2011, CRS309 switch, atsevišķa AP un CAPsMAN
-kontrolieris. Tie atšķiras noderīgi, un katra no zemāk minētajām atšķirībām deva
-nepareizu atbildi, kas izskatījās pareiza, līdz tests to pieķēra:
+Seši snapshot'i: JL357A, MikroTik RB2011, CRS309 switch, atsevišķa AP, CAPsMAN
+kontrolieris un AP, ko tas kontrolieris pārvalda. Tie atšķiras noderīgi, un katra
+no zemāk minētajām atšķirībām deva nepareizu atbildi, kas izskatījās pareiza, līdz
+tests to pieķēra:
 
 - RB2011 atstāj Q-BRIDGE egress tabulu tukšu, aizpildot `dot1qPvid`, un tāpēc
   katrs ports iznāca kā `access`, ieskaitot trunkus — un CRS309 ir komplektā
@@ -311,6 +314,9 @@ nepareizu atbildi, kas izskatījās pareiza, līdz tests to pieķēra:
   pysnmp OID izdrukā caur saviem MIB
 - atsevišķa AP savus klientus glabā citā tabulā nekā CAPsMAN kontrolieris, un tai
   tabulai nav SSID kolonnas
+- pārvaldīta AP ziņo sešus radio `up`, bet `mtxrWlAp` ir tikai divas rindas, abām
+  rūpnīcas SSID un nulle klientu — un tāpēc netviz zīmēja divus dīkstāves radio uz
+  iekārtas, kas apkalpo astoņpadsmit klientus
 
 Testi nekad neaiztiek dzelzi. Snapshot ņem divos soļos, un otrais ir obligāts:
 
@@ -387,6 +393,29 @@ izskatās vienādi abos gadījumos.
 `mtxrWlAp` ir aizpildīta radio, kas **konfigurēts** AP režīmā, neatkarīgi no tā,
 vai tas šobrīd ir `up`. Radio, kas atstāts station režīmā, tur nav vispār — to
 vērts zināt, ja iekārta neziņo bezvadu daļu, kur to gaidīji.
+
+### Pārvaldīta AP nezina savu klientu skaitu
+
+Ja prasa CAPsMAN pārvaldītai AP tieši, notiek viens no diviem. Vai nu tā neatbild
+neko — `mtxrWlAp` nav rindu, un netviz nezīmē nevienu radio — vai atbild ar
+*vietējo* konfigurāciju, ko neviens neizmanto: rūpnīcas SSID un nulle klientu, kaut
+patiesie klienti ir uz kontroliera. Abi gadījumi novēroti uz cAP ac vienā tīklā.
+
+Tā nulle nav mērījums, tāpēc netviz to neziņo. Tāds radio atgriežas kā `unknown`,
+nevis `0`, tā bloks priekšpanelī ir zils, nevis zaļš, un tooltip pasaka, ka
+klienti tiek skaitīti uz kontroliera. Nulle tur uzzīmētu dīkstāves radio uz AP,
+kas nes astoņpadsmit klientus.
+
+Pazīme ir aritmētiska: ja `up` radio interfeisu ir vairāk nekā rindu `mtxrWlAp`,
+tad liekos ir izveidojis kontrolieris. Iekārtai, kas radio apkalpo pati, ir viena
+rinda uz katru radio.
+
+Klienti patiesībā ir uz kontroliera, zem tā dinamiskajiem interfeisiem — un
+CAPsMAN tos nosauc pēc AP un joslas, tāpēc `24Ghz-<ap nosaukums>-1` uz kontroliera
+ir tas pats radio, par ko prasīji AP. netviz šos divus vēl nesasaista: vienīgais,
+kas kontroliera radio saista ar AP, ir operatora izvēlēts nosaukums, un salikt tos
+pēc tā būtu minējums, kas izliktos par faktu. Ieslēdz kontroliera radio sensorus,
+un skaitļi visi ir tur.
 
 **Apzināti tikai agregāti.** Reģistrācijas tabula ir indeksēta pēc klienta MAC
 adreses. Taisīt no tām entītijas nozīmētu izsekot visus mājā, Home Assistant tam

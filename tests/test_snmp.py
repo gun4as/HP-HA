@@ -352,9 +352,13 @@ async def test_capsman_aggregates_clients_by_ssid_and_by_radio(capsman):
     assert wireless["clients"] == len(registrations)
     assert data["system"]["wireless_clients"] == len(registrations)
 
-    # every client is counted once per view, and only once
+    # every client is counted once per view, and only once. The radios this
+    # controller manages for itself contribute None rather than 0 - see
+    # test_a_managed_radio_reports_unknown_rather_than_zero.
     assert sum(v["clients"] for v in wireless["ssids"].values()) == len(registrations)
-    assert sum(v["clients"] for v in wireless["radios"].values()) == len(registrations)
+    assert sum(
+        v["clients"] or 0 for v in wireless["radios"].values()
+    ) == len(registrations)
     assert len(wireless["ssids"]) >= 2
 
 
@@ -561,11 +565,62 @@ async def test_a_radio_in_ap_mode_appears_even_with_no_clients(capsman):
     fills for one configured in AP mode; a radio in station mode has no row.
     """
     radios = (await FixtureClient(capsman).poll(capsman.physical_ports()))["wireless"]["radios"]
-    idle = [r for r in radios.values() if "ssid" in r and r["clients"] == 0]
-    assert idle, "fixture should have a configured radio with nothing attached"
-    for radio in idle:
+    configured = [r for r in radios.values() if "ssid" in r and not r["clients"]]
+    assert configured, "fixture should have a configured radio with nothing attached"
+    for radio in configured:
         assert radio["ssid"]
         assert radio["noise_floor"] is not None
+
+
+async def test_a_managed_radio_reports_unknown_rather_than_zero(capsman):
+    """A radio a controller provisions cannot count its own clients.
+
+    This controller runs CAPsMAN for its own radios too, so mtxrWlAp describes
+    the local configuration nobody is served by - default SSID, zero clients -
+    while the clients sit on the controller's own dynamic interfaces. Reporting
+    that zero would paint an idle radio that is in fact carrying two dozen
+    clients, the same mistake as reporting 0 W for an unmetered PoE port.
+    """
+    radios = (await FixtureClient(capsman).poll(capsman.physical_ports()))["wireless"]["radios"]
+    local = [r for r in radios.values() if "ssid" in r]
+    assert local, "fixture should expose local radio configuration"
+    for radio in local:
+        assert radio["managed"] is True
+        assert radio["clients"] is None, "a managed radio must not claim zero"
+
+
+async def test_a_provisioned_access_point_admits_it_cannot_count(capac):
+    """The device this behaviour was built for.
+
+    Six radios up against two mtxrWlAp rows: four of them were created by the
+    controller, which is where the clients are counted. Before this, the card
+    drew two idle green radios on an access point serving eighteen clients.
+    """
+    data = await FixtureClient(capac).poll(capac.physical_ports())
+    radios = data["wireless"]["radios"]
+    assert len(radios) == 2, "only the locally configured radios have rows"
+    for radio in radios.values():
+        assert radio["managed"] is True
+        assert radio["clients"] is None
+        assert radio["up"] is True, "the radio is transmitting, just not for us"
+    # and the device total must not pretend to a number either
+    assert data["wireless"]["clients"] == 0
+    assert data["system"]["wireless_clients"] == 0
+
+
+async def test_a_standalone_radio_still_counts_its_own_clients(rb951):
+    """The heuristic must not fire where no controller is involved.
+
+    One radio interface up and one row in mtxrWlAp means the device serves that
+    radio itself, so its own numbers are the only ones there are.
+    """
+    radios = (await FixtureClient(rb951).poll(rb951.physical_ports()))["wireless"]["radios"]
+    local = [r for r in radios.values() if "ssid" in r]
+    assert local, "fixture should expose local radio configuration"
+    for radio in local:
+        assert radio["managed"] is False
+        assert isinstance(radio["clients"], int)
+    assert any(r["clients"] > 0 for r in local), "fixture lost its connected client"
 
 
 async def test_discovery_detects_poe_without_a_prior_probe(rb2011):

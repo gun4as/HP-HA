@@ -57,9 +57,10 @@ an RB951G, a CRS309-1G-8S+ and a CRS112-8G-4S.
   about access versus trunk rather than guessing. Confirmed across all eight
   devices, including two CRS switches with bridge VLAN filtering — so this is the
   vendor rather than a class of device.
-- **Wireless needs the controller.** A managed access point answers almost
-  nothing about its own radios, so pointing netviz at one gives ports and no
-  wireless. Point it at the CAPsMAN controller instead and it covers every AP.
+- **Wireless needs the controller.** A managed access point cannot count clients
+  on its own radios — it answers either nothing or its unused local configuration
+  — so netviz marks those radios as managed and reports the count as unknown.
+  Point it at the CAPsMAN controller as well and every AP is covered.
 
 ## Installing through HACS
 
@@ -214,7 +215,8 @@ state from the other entities of the same device. It collects ports by their
 
 Radios appear on the faceplate too, as rounded blocks after the ports, labelled
 by band — `2.4G`, `5G`. Green means clients are attached, dark green means up and
-idle, grey means not running, and the tooltip carries the SSID, client count,
+idle, blue means a controller manages the radio and this device cannot count its
+clients, grey means not running. The tooltip carries the SSID, client count,
 average signal, noise floor and transmit quality. Only radios the device serves
 itself get a block: a CAPsMAN controller reports one per managed access point,
 and those belong on the faceplate of the access point that has them.
@@ -319,9 +321,10 @@ their files, so a real `SnmpClient` runs with only `walk()` and `get_many()` fed
 from a recorded snapshot. Everything above those two methods is the production
 code path.
 
-Five snapshots: a JL357A, a MikroTik RB2011, a CRS309 switch, a standalone AP
-and a CAPsMAN controller. They disagree in useful ways, and every disagreement
-below produced a wrong answer that looked like a right one until a test pinned it:
+Six snapshots: a JL357A, a MikroTik RB2011, a CRS309 switch, a standalone AP, a
+CAPsMAN controller and an AP that controller provisions. They disagree in useful
+ways, and every disagreement below produced a wrong answer that looked like a
+right one until a test pinned it:
 
 - the RB2011 leaves the Q-BRIDGE egress table empty while filling `dot1qPvid`,
   which made every port come out as `access`, trunks included — and the CRS309 is
@@ -335,6 +338,9 @@ below produced a wrong answer that looked like a right one until a test pinned i
   form, because pysnmp renders OIDs through its MIBs
 - a standalone access point keeps its clients in a different table from a CAPsMAN
   controller, and that table has no SSID column
+- a provisioned access point reports six radios up but only two rows in
+  `mtxrWlAp`, both with the factory SSID and no clients, which had netviz drawing
+  two idle radios on a device serving eighteen clients
 
 The tests never touch hardware — they run against snapshots taken from real
 devices and then scrubbed. Two steps, and the second one is mandatory:
@@ -414,6 +420,31 @@ per-SSID and per-radio numbers look the same either way.
 `mtxrWlAp` is populated for a radio configured in AP mode, whether or not it is
 currently up. A radio left in station mode has no row at all, which is worth
 knowing if a device reports no wireless when you expected some.
+
+### A managed access point does not know its own client count
+
+Ask a CAPsMAN-provisioned AP directly and one of two things happens. Either it
+answers nothing at all — no `mtxrWlAp` rows, so netviz draws no radios — or it
+answers with the *local* configuration nobody is being served by: the factory
+SSID and zero clients, while its real clients are on the controller. Both were
+observed on cAP ac units on the same network.
+
+That zero is not a measurement, so netviz does not report it. Such a radio comes
+back as `unknown` rather than `0`, its faceplate block is blue rather than green,
+and the tooltip says the clients are counted on the controller. A zero there
+would paint an idle radio on an access point carrying eighteen clients.
+
+The sign of it is arithmetic: more radio interfaces up than rows in `mtxrWlAp`
+means a controller created the extra ones. A device serving its own radios has
+one row per radio.
+
+Where those clients actually are is the controller, under its own dynamic
+interfaces — and CAPsMAN names them after the access point and the band, so
+`24Ghz-<ap name>-1` on the controller is the radio you were asking the AP about.
+netviz does not yet link the two: the only thing joining a controller radio to an
+access point is that operator-chosen name, and matching on it would be a guess
+dressed as a fact. Enable the controller's per-radio sensors and the numbers are
+all there.
 
 **Aggregates only, deliberately.** The registration table is keyed by client MAC
 address. Turning those into entities would be tracking everyone in the building,
