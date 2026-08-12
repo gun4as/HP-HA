@@ -452,6 +452,19 @@ not the card. The band comes from the frequency in `mtxrWlAp`, an access point
 whose local AP configuration was removed reports no such row, and naming the band
 from the interface instead would be a guess. The tooltip says so on the block.
 
+Not every column of that row is equally worthless, and netviz publishes them
+accordingly:
+
+| column | on a controller-driven radio | published |
+|---|---|---|
+| SSID | reads as the factory default while the AP serves other names | no |
+| clients | clients on that unused SSID, so zero | no, `unknown` |
+| noise floor, CCQ | physical measurements of the radio | yes |
+| frequency | the radio's own, so the band follows | yes, and the tooltip says where it came from |
+
+Nothing here proves the frequency tracks the channel the controller assigned, so
+the band is presented as the radio's own report rather than as verified fact.
+
 The radios still get drawn, though, because they are the access point's own
 hardware and they are transmitting. Which of them are real comes from the MAC
 address: bit 1 of the first octet is IEEE's locally-administered flag, clear on

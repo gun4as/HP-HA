@@ -478,10 +478,12 @@ async def test_delivering_with_zero_power_reports_unknown(rb2011):
 
 
 async def test_locally_served_radios_are_included(capsman):
-    """A controller serves a couple of radios itself, and mtxrWlAp reports them.
+    """A controller has radios of its own, and mtxrWlAp reports on them.
 
-    Those four columns were declared in the profile and never read - this is the
-    fixture that proves they carry SSID, noise floor and transmit quality.
+    Those columns were declared in the profile and never read - this is the
+    fixture that proves they carry noise floor, transmit quality and frequency.
+    The SSID column is read too but withheld where a controller drives the radio,
+    because there it names a network the radio is not carrying.
     """
     from conftest import profiles
 
@@ -495,20 +497,22 @@ async def test_locally_served_radios_are_included(capsman):
     for index in ap_ssids:
         ifindex = index.split(".")[0]
         radio = radios[ifindex]
-        assert radio["ssid"], f"radio {ifindex} has no SSID"
+        assert radio["local"] is True, f"radio {ifindex} is this device's own"
         assert -120 < radio["noise_floor"] < 0, "noise floor is dBm, negative"
         assert 0 <= radio["quality"] <= 100, "CCQ is a percentage"
+        assert radio["band"] in ("2.4G", "5G", "6G")
 
     # radios attributed from the controller's registrations carry no such fields
-    from_registrations = [r for r in radios.values() if "ssid" not in r]
+    from_registrations = [r for r in radios.values() if not r.get("local")]
     assert from_registrations, "fixture should have both kinds of radio"
+    assert all("noise_floor" not in r for r in from_registrations)
 
 
 async def test_a_controller_counts_registrations_over_the_radio_tally(capsman):
     """Both sources report clients; the per-client one is exact."""
     data = await FixtureClient(capsman).poll(capsman.physical_ports())
     total = sum(
-        r["clients"] for r in data["wireless"]["radios"].values() if "ssid" not in r
+        r["clients"] for r in data["wireless"]["radios"].values() if not r.get("local")
     )
     assert total == data["wireless"]["clients"]
 
@@ -565,11 +569,14 @@ async def test_a_radio_in_ap_mode_appears_even_with_no_clients(capsman):
     fills for one configured in AP mode; a radio in station mode has no row.
     """
     radios = (await FixtureClient(capsman).poll(capsman.physical_ports()))["wireless"]["radios"]
-    configured = [r for r in radios.values() if "ssid" in r and not r["clients"]]
+    configured = [r for r in radios.values() if r.get("local") and not r["clients"]]
     assert configured, "fixture should have a configured radio with nothing attached"
     for radio in configured:
-        assert radio["ssid"]
+        # The row exists and carries the radio's own measurements. Its SSID is
+        # withheld here only because a controller drives this one - see
+        # test_a_managed_radio_reports_unknown_rather_than_zero.
         assert radio["noise_floor"] is not None
+        assert radio["frequency"]
 
 
 async def test_a_managed_radio_reports_unknown_rather_than_zero(capsman):
@@ -582,11 +589,16 @@ async def test_a_managed_radio_reports_unknown_rather_than_zero(capsman):
     clients, the same mistake as reporting 0 W for an unmetered PoE port.
     """
     radios = (await FixtureClient(capsman).poll(capsman.physical_ports()))["wireless"]["radios"]
-    local = [r for r in radios.values() if "ssid" in r]
+    local = [r for r in radios.values() if r.get("local")]
     assert local, "fixture should expose local radio configuration"
     for radio in local:
         assert radio["managed"] is True
         assert radio["clients"] is None, "a managed radio must not claim zero"
+        # The row's SSID names the local configuration, not what is being
+        # carried - on this controller it reads as the factory default while
+        # the access points serve several other names.
+        assert "ssid" not in radio, "a managed radio must not claim an SSID"
+        assert radio["noise_floor"] is not None, "the radio still measures"
 
 
 async def test_a_provisioned_access_point_admits_it_cannot_count(capac):
@@ -642,11 +654,13 @@ async def test_a_standalone_radio_still_counts_its_own_clients(rb951):
     radio itself, so its own numbers are the only ones there are.
     """
     radios = (await FixtureClient(rb951).poll(rb951.physical_ports()))["wireless"]["radios"]
-    local = [r for r in radios.values() if "ssid" in r]
+    local = [r for r in radios.values() if r.get("local")]
     assert local, "fixture should expose local radio configuration"
     for radio in local:
         assert radio["managed"] is False
         assert isinstance(radio["clients"], int)
+        # Nobody else is driving this radio, so its own SSID is the one on air
+        assert radio["ssid"]
     assert any(r["clients"] > 0 for r in local), "fixture lost its connected client"
 
 

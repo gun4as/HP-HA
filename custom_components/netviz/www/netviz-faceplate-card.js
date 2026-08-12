@@ -485,7 +485,10 @@ class NetvizFaceplateCard extends HTMLElement {
       // reports none. Naming the band from the interface would be a guess.
       if (!attrs.band) lines.push("band unknown - the device reports no frequency");
       if (attrs.managed) {
-        lines.push("managed by a controller - clients are counted there");
+        lines.push(
+          "managed by a controller - SSID and clients are on it; the band is " +
+          "this radio's own report"
+        );
       } else if (Number.isFinite(clients)) {
         lines.push(`${clients} client${clients === 1 ? "" : "s"}`);
       }
@@ -556,4 +559,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.6 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.7 ", "background:#2ea3f2;color:#fff", "");

@@ -720,7 +720,17 @@ class SnmpClient:
                     "signal_max": None,
                 },
             )
-            radio["ssid"] = info["ssid"]
+            # Where a controller drives the radio, this row is the local
+            # configuration and only some of its columns describe what is on air.
+            # The SSID demonstrably does not: it reads as the factory default on
+            # an access point serving several other names, so it is dropped
+            # rather than shown next to a radio that is not carrying it. The
+            # noise floor and CCQ are physical measurements of the radio and
+            # plausible on their face. The frequency is the radio's own, so the
+            # band is kept - though nothing here proves it follows the channel
+            # the controller assigned, and the card says as much.
+            if not managed:
+                radio["ssid"] = info["ssid"]
             radio["noise_floor"] = info["noise_floor"]
             radio["quality"] = info["quality"]
             radio["frequency"] = info["frequency"]

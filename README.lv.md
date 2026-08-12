@@ -423,6 +423,19 @@ frekvences `mtxrWlAp` tabulā; AP, kurai vietējā AP konfigurācija ir noņemta
 rindas nav, un nosaukt joslu pēc interfeisa būtu minējums. Tooltip to pasaka uz
 paša bloka.
 
+Ne visas tās rindas kolonnas ir vienlīdz nederīgas, un netviz tās publicē
+attiecīgi:
+
+| kolonna | uz kontroliera vadīta radio | publicē |
+|---|---|---|
+| SSID | rāda rūpnīcas noklusējumu, kamēr AP apkalpo citus vārdus | nē |
+| klienti | tā neizmantotā SSID klienti, tātad nulle | nē, `unknown` |
+| trokšņu grīda, CCQ | fiziski radio mērījumi | jā |
+| frekvence | paša radio, tātad josla no tās | jā, un tooltip pasaka, no kurienes |
+
+Nekas te nepierāda, ka frekvence seko kanālam, ko piešķīris kontrolieris, tāpēc
+josla tiek pasniegta kā paša radio ziņojums, nevis kā pārbaudīts fakts.
+
 Radio tomēr tiek uzzīmēti, jo tie ir tās AP paša dzelzs un tie raida. Kurš no
 tiem ir īsts, pasaka MAC adrese: pirmā okteta 1. bits ir IEEE *locally
 administered* karodziņš — nulle adresei, kas iededzināta NIC, un viens tādai, ko
