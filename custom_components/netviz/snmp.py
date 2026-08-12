@@ -594,6 +594,25 @@ class SnmpClient:
                 if signal is not None:
                     bucket["_signals"].append(signal)
 
+        # Every interface the controller has provisioned, whether or not anybody
+        # is on it. Counting registrations can only find a network in use, so a
+        # configured SSID sitting empty was missing from the list altogether -
+        # three networks per band on each access point, and only the busy ones
+        # showed. This table is indexed by ifIndex, so the names line up.
+        for ifindex, raw_count in (await self._cm_interfaces()).items():
+            bucket = by_radio.setdefault(
+                ifindex,
+                {
+                    "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                    "clients": 0,
+                    "_signals": [],
+                },
+            )
+            # Registrations are per-client and carry signal, so they win where
+            # they exist; this is the floor that makes an empty network visible.
+            if not bucket.get("clients"):
+                bucket["clients"] = raw_count
+
         for bucket in (*by_ssid.values(), *by_radio.values()):
             found = bucket.pop("_signals")
             bucket["signal_avg"] = round(sum(found) / len(found)) if found else None
@@ -670,6 +689,30 @@ class SnmpClient:
             }
             for index, raw in ssids.items()
         }
+
+    async def _cm_interfaces(self) -> dict[str, int]:
+        """ifIndex to client count for each interface the controller provisions.
+
+        Only rows in an AP state are returned: the table also carries interfaces
+        that exist but are not serving, and a count against one of those would be
+        a number about nothing. Empty on any device that is not a controller.
+        """
+        source = self.profile.wireless
+        if source is None or not source.cm_clients_oid:
+            return {}
+        counts = await self.walk(source.cm_clients_oid)
+        if not counts:
+            return {}
+        states = await self.walk(source.cm_state_oid) if source.cm_state_oid else {}
+        out = {}
+        for index, raw in counts.items():
+            ifindex = index.split(".")[0]
+            state = str(states.get(index, "")).strip()
+            if states and not state.startswith("running"):
+                continue
+            if (count := _as_int(raw)) is not None:
+                out[ifindex] = count
+        return out
 
     async def _radios_up(self, oper: dict) -> dict[str, str]:
         """ifIndex to name for every radio interface that is running."""

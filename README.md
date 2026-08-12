@@ -435,6 +435,28 @@ noise floor and transmit quality. A standalone AP keeps its clients in a separat
 table with no SSID column, so the SSID is attributed per interface; the resulting
 per-SSID and per-radio numbers look the same either way.
 
+### A network with nobody on it is still a network
+
+Client counts used to come only from counting registrations, which can find a
+network somebody is using and nothing else. Each access point here carries three
+networks per band, and the empty ones were not shown as zero — they were absent.
+
+The controller's provisioned-interface table (`mtxrWlCM`, `1.3.6.1.4.1.14988.1.1.1.7.1`)
+lists every interface it has provisioned with its own client count, and is indexed
+by ifIndex so the interface names line up. Rows not in a running-AP state are
+skipped, because a count against an interface that is not serving is a number
+about nothing. Registrations still win where they exist, since they are per-client
+and carry signal strength; the table is the floor that makes an empty network
+visible.
+
+One thing SNMP will not give: the *name* of an SSID nobody is on. The SSID appears
+only in the registration table, per client, so an empty network is identifiable by
+its interface — `24Ghz-<ap>-1-1` — and not by the SSID it is broadcasting.
+
+These per-interface sensors are disabled by default, because a controller with
+four access points produces twenty-one of them. Enable the ones you want under
+Settings → Devices & services → Entities.
+
 `mtxrWlAp` is populated for a radio configured in AP mode, whether or not it is
 currently up. A radio left in station mode has no row at all, which is worth
 knowing if a device reports no wireless when you expected some.

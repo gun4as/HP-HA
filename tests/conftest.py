@@ -159,6 +159,18 @@ def capsman() -> Snapshot:
 
 
 @pytest.fixture
+def capsman_provisioned() -> Snapshot:
+    """The same controller after its local radios were taken out of AP mode.
+
+    No mtxrWlAp rows at all, and instead 21 rows of the provisioned-interface
+    table: three networks per band on each of four access points, twelve of them
+    with nobody connected. Kept beside the older snapshot rather than replacing
+    it, because each pins a state the other cannot.
+    """
+    return Snapshot(FIXTURES / "capsman-provisioned.json")
+
+
+@pytest.fixture
 def capac() -> Snapshot:
     """MikroTik cAP ac provisioned by a controller.
 

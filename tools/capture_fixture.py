@@ -38,6 +38,11 @@ WALK_OIDS = {
     # address. Raw, because six octets are not text - str() turns 0x48 into "H"
     "1.3.6.1.2.1.2.2.1.6": ("ifPhysAddress", True),
     "1.3.6.1.2.1.2.2.1.7": ("ifAdminStatus", False),
+    # The controller's provisioned-interface table, indexed by ifIndex. Without
+    # it a network nobody is on cannot be told from one that does not exist
+    "1.3.6.1.4.1.14988.1.1.1.7.1.2": ("mtxrWlCMInterfaceClients", False),
+    "1.3.6.1.4.1.14988.1.1.1.7.1.4": ("mtxrWlCMInterfaceState", False),
+    "1.3.6.1.4.1.14988.1.1.1.7.1.5": ("mtxrWlCMInterfaceChannel", False),
     "1.3.6.1.2.1.2.2.1.8": ("ifOperStatus", False),
     "1.3.6.1.2.1.31.1.1.1.1": ("ifName", False),
     "1.3.6.1.2.1.31.1.1.1.15": ("ifHighSpeed", False),

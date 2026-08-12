@@ -407,6 +407,28 @@ kvalitāte. Atsevišķa AP savus klientus glabā citā tabulā, kurai nav SSID
 kolonnas, tāpēc SSID tiek piešķirts pēc interfeisa; rezultāts pa SSID un pa radio
 izskatās vienādi abos gadījumos.
 
+### Tīkls bez klientiem joprojām ir tīkls
+
+Klientu skaits agrāk nāca tikai no reģistrāciju skaitīšanas, un tā var atrast
+tikai tīklu, ko kāds lieto. Katrai AP šeit ir trīs tīkli uz joslu, un tie tukšie
+netika rādīti kā nulle — tie vienkārši nebija sarakstā.
+
+Kontroliera provizionēto interfeisu tabula (`mtxrWlCM`,
+`1.3.6.1.4.1.14988.1.1.1.7.1`) uzskaita katru provizionēto interfeisu ar savu
+klientu skaitu, un tā ir indeksēta pēc ifIndex, tāpēc nosaukumi sakrīt. Rindas,
+kas nav `running-ap` stāvoklī, tiek izlaistas, jo skaits pret interfeisu, kas
+neapkalpo, ir skaitlis par neko. Reģistrācijas joprojām uzvar tur, kur tās ir, jo
+tās ir uz katru klientu un nes signāla stiprumu; tabula ir tā apakšmala, kas
+padara tukšu tīklu redzamu.
+
+Ko SNMP nedod: tāda SSID **nosaukumu**, uz kura nav neviena. SSID parādās tikai
+reģistrāciju tabulā, uz katru klientu, tāpēc tukšs tīkls ir atpazīstams pēc
+interfeisa — `24Ghz-<ap>-1-1` — nevis pēc SSID, ko tas raida.
+
+Šie interfeisu sensori pēc noklusējuma ir izslēgti, jo kontrolieris ar četrām AP
+tādu uztaisa divdesmit vienu. Vajadzīgos ieslēdz sadaļā
+Settings → Devices & services → Entities.
+
 `mtxrWlAp` ir aizpildīta radio, kas **konfigurēts** AP režīmā, neatkarīgi no tā,
 vai tas šobrīd ir `up`. Radio, kas atstāts station režīmā, tur nav vispār — to
 vērts zināt, ja iekārta neziņo bezvadu daļu, kur to gaidīji.

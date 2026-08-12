@@ -125,6 +125,14 @@ class WirelessSource:
     ap_freq_oid: str | None = None
     ap_noise_oid: str | None = None
     ap_ccq_oid: str | None = None
+    # The controller's own table of provisioned interfaces, indexed by ifIndex.
+    # Counting registrations can only ever find a network somebody is using; this
+    # is what shows the rest, so a configured SSID with nobody on it is a zero
+    # rather than an absence. The channel column is populated on the master
+    # interface of a radio and empty on the virtual APs hanging off it.
+    cm_clients_oid: str | None = None
+    cm_state_oid: str | None = None
+    cm_channel_oid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +210,9 @@ ROUTEROS = Profile(
         ap_freq_oid="1.3.6.1.4.1.14988.1.1.1.3.1.7",
         ap_noise_oid="1.3.6.1.4.1.14988.1.1.1.3.1.9",
         ap_ccq_oid="1.3.6.1.4.1.14988.1.1.1.3.1.10",
+        cm_clients_oid="1.3.6.1.4.1.14988.1.1.1.7.1.2",
+        cm_state_oid="1.3.6.1.4.1.14988.1.1.1.7.1.4",
+        cm_channel_oid="1.3.6.1.4.1.14988.1.1.1.7.1.5",
     ),
     vlan_egress=False,
 )

@@ -647,6 +647,50 @@ async def test_a_controller_created_radio_gets_no_block(capac_silent):
     assert len(data["wireless"]["radios"]) == 2, "only the burned-in two"
 
 
+async def test_a_network_with_nobody_on_it_is_still_a_network(capsman_provisioned):
+    """Counting registrations can only ever find a network somebody is using.
+
+    Each access point carries three networks per band, and the empty ones were
+    missing from the list altogether - not shown as zero, simply absent. The
+    controller's provisioned-interface table is what makes them visible, and it
+    is indexed by ifIndex so the interface names line up.
+    """
+    data = await FixtureClient(capsman_provisioned).poll(
+        capsman_provisioned.physical_ports()
+    )
+    radios = data["wireless"]["radios"]
+    empty = [r for r in radios.values() if r["clients"] == 0]
+    busy = [r for r in radios.values() if (r["clients"] or 0) > 0]
+    assert empty, "the whole point: a provisioned network with no clients"
+    assert busy, "and the fixture still has networks in use"
+
+    # every client is accounted for exactly once across the interfaces
+    counted = sum(r["clients"] or 0 for r in radios.values())
+    assert counted == data["wireless"]["clients"]
+
+
+async def test_an_interface_that_is_not_serving_is_left_out(capsman_provisioned):
+    """The table also holds interfaces in other states.
+
+    A client count against an interface that is not running would be a number
+    about nothing, so only rows in an AP state are taken.
+    """
+    from conftest import profiles
+
+    states = capsman_provisioned.walk(profiles.ROUTEROS.wireless.cm_state_oid)
+    assert states, "fixture should carry the state column"
+    assert all(str(v).startswith("running") for v in states.values()), (
+        "this fixture happens to have every interface running - the filter is "
+        "still exercised by the assertion below, which would catch its removal"
+    )
+    counts = capsman_provisioned.walk(profiles.ROUTEROS.wireless.cm_clients_oid)
+    data = await FixtureClient(capsman_provisioned).poll(
+        capsman_provisioned.physical_ports()
+    )
+    from_table = {i.split(".")[0] for i in counts}
+    assert from_table <= set(data["wireless"]["radios"]), "no row was dropped"
+
+
 async def test_an_enabled_ap_with_nobody_on_it_is_not_down(rb951_idle):
     """RouterOS reports ifOperStatus down on an AP-mode radio until someone joins.
 
