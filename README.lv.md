@@ -425,9 +425,10 @@ Ko SNMP nedod: tāda SSID **nosaukumu**, uz kura nav neviena. SSID parādās tik
 reģistrāciju tabulā, uz katru klientu, tāpēc tukšs tīkls ir atpazīstams pēc
 interfeisa — `24Ghz-<ap>-1-1` — nevis pēc SSID, ko tas raida.
 
-Šie interfeisu sensori pēc noklusējuma ir izslēgti, jo kontrolieris ar četrām AP
-tādu uztaisa divdesmit vienu. Vajadzīgos ieslēdz sadaļā
-Settings → Devices & services → Entities.
+Šie interfeisu sensori pēc noklusējuma ir ieslēgti. Sākumā tie bija izslēgti, jo
+tie ir citu iekārtu radio — bet kontroliera bezvadu skats ir tas, kāpēc kontrolieri
+vispār pievieno netviz, un divdesmit vienas entītijas ieslēgšana ar rokām nav
+saprātīgs noklusējums. Skaitu ierobežo radio daudzums tīklā, nevis klientu skaits.
 
 `mtxrWlAp` ir aizpildīta radio, kas **konfigurēts** AP režīmā, neatkarīgi no tā,
 vai tas šobrīd ir `up`. Radio, kas atstāts station režīmā, tur nav vispār — to

@@ -64,7 +64,9 @@ def _undo_our_own_disable(
     created, so changing that default left every already-created one hidden - on
     exactly the access points whose radios are the interesting half. The card then
     drew a block with no entity behind it and no reload could help, because HA
-    never re-enables an entity on its own.
+    never re-enables an entity on its own. The same applies to the controller's
+    provisioned interfaces, which were disabled on the same reasoning and for the
+    same span of versions.
 
     Only a disable recorded as the integration's own is cleared. One the user made
     is theirs, and stays. Done before the entities are added, so the platform sees
@@ -72,9 +74,7 @@ def _undo_our_own_disable(
     """
     registry = er.async_get(hass)
     entry_id = coordinator.config_entry.entry_id
-    for ifindex, radio in coordinator.wireless.get("radios", {}).items():
-        if not radio.get("local"):
-            continue
+    for ifindex in coordinator.wireless.get("radios", {}):
         entity_id = registry.async_get_entity_id(
             "sensor", DOMAIN, f"{entry_id}_wifi_radio_{ifindex}"
         )
@@ -323,11 +323,12 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
     def __init__(
         self, coordinator: NetvizCoordinator, ifindex: str, name: str
     ) -> None:
-        # A radio this device serves itself is one of two or three and belongs on
-        # its faceplate, so it is on by default. A controller reports one per
-        # managed access point, which is a long list of somebody else's radios.
-        radio = coordinator.wireless.get("radios", {}).get(ifindex, {})
-        self._attr_entity_registry_enabled_default = bool(radio.get("local"))
+        # On by default, including the interfaces a controller provisions for the
+        # access points it manages. Those were off at first, on the reasoning that
+        # they are somebody else's radios - but a controller's wireless view is
+        # the reason to point netviz at one at all, and having to enable
+        # twenty-one entities by hand to get it is not a sensible default. It is
+        # radios, not clients, so the count stays bounded by the estate.
         # Keyed by ifIndex rather than by name: a CAPsMAN interface is named
         # after the access point and the band, and renaming either should not
         # orphan the history.

@@ -453,9 +453,11 @@ One thing SNMP will not give: the *name* of an SSID nobody is on. The SSID appea
 only in the registration table, per client, so an empty network is identifiable by
 its interface — `24Ghz-<ap>-1-1` — and not by the SSID it is broadcasting.
 
-These per-interface sensors are disabled by default, because a controller with
-four access points produces twenty-one of them. Enable the ones you want under
-Settings → Devices & services → Entities.
+These per-interface sensors are on by default. They were off at first, on the
+reasoning that they are somebody else's radios — but a controller's wireless view
+is the reason to point netviz at a controller at all, and enabling twenty-one
+entities by hand to get it is not a sensible default. The count is bounded by the
+number of radios in the estate, not by the number of clients.
 
 `mtxrWlAp` is populated for a radio configured in AP mode, whether or not it is
 currently up. A radio left in station mode has no row at all, which is worth
