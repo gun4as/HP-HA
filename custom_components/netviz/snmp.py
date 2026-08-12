@@ -520,7 +520,9 @@ class SnmpClient:
         self._vlan_cache = (now, result)
         return result
 
-    async def _wireless(self, names: dict, oper: dict | None = None) -> dict:
+    async def _wireless(
+        self, names: dict, oper: dict | None = None, admin: dict | None = None
+    ) -> dict:
         """Wireless clients, aggregated.
 
         Read from a CAPsMAN controller, this covers every access point it
@@ -535,6 +537,7 @@ class SnmpClient:
         source = self.profile.wireless
         if source is None:
             return {}
+        admin = admin or {}
         registrations = await self.walk(source.registration_ssid_oid)
         # mtxrWlAp says which radios this device serves itself, and for a local
         # client the SSID has to come from there - the local registration table
@@ -607,7 +610,7 @@ class SnmpClient:
             managed = bool(virtual)
         else:
             managed = bool(local) and len(await self._radios_up(oper)) > len(local)
-        self._merge_local_radios(names, by_radio, local, oper, managed)
+        self._merge_local_radios(names, by_radio, local, oper, managed, admin)
 
         # A fully provisioned access point has no mtxrWlAp row at all, so nothing
         # above put its radios anywhere. They are transmitting and worth drawing;
@@ -706,9 +709,11 @@ class SnmpClient:
         local: dict[str, dict],
         oper: dict | None = None,
         managed: bool = False,
+        admin: dict | None = None,
     ) -> None:
         """Attach what a locally served radio says about itself."""
         oper = oper or {}
+        admin = admin or {}
         for ifindex, info in local.items():
             radio = by_radio.setdefault(
                 ifindex,
@@ -735,9 +740,20 @@ class SnmpClient:
             radio["quality"] = info["quality"]
             radio["frequency"] = info["frequency"]
             radio["band"] = info["band"]
-            # A radio configured in AP mode still has a row when it is down, and
-            # "up with nobody attached" is a different thing from "not running".
-            radio["up"] = _as_int(oper.get(ifindex)) == 1
+            # RouterOS reports ifOperStatus down on a wireless interface in AP
+            # mode until a client associates. The radio is running: the same
+            # interface reports a noise floor around -104 dBm and 97% transmit
+            # quality at the same moment, which a radio that was off could not
+            # do. Calling that "down" put a working access point in the same
+            # colour as a disabled one. ifAdminStatus plus the existence of this
+            # row settles it - the row means AP mode, and a radio in station mode
+            # has none, so an unassociated station is still correctly not up.
+            # ifAdminStatus alone would do, since this row proves AP mode; the
+            # ifOperStatus arm is the fallback for a device that answers no
+            # admin table, and for a vendor that reports AP mode honestly.
+            radio["up"] = (
+                _as_int(admin.get(ifindex)) == 1 or _as_int(oper.get(ifindex)) == 1
+            )
             radio["managed"] = managed
             # This device owns the radio, as against the ones a controller
             # reports on behalf of the access points it manages.
@@ -830,7 +846,9 @@ class SnmpClient:
                 mem_free, mem_used = await self._storage(memory.storage_match)
 
             wireless = (
-                await self._wireless(names, oper) if self.profile.wireless else {}
+                await self._wireless(names, oper, admin)
+                if self.profile.wireless
+                else {}
             )
 
             main_power = await self.walk(poe.main_power_oid) if (

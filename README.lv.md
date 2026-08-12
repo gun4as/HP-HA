@@ -203,6 +203,12 @@ Assistant to karodziņu piemēro tikai entītijas izveides brīdī, tāpēc pēc
 atjaunināšanas tie palika paslēpti; netviz tagad ielādes laikā to karodziņu noņem
 tur, kur pats to uzlika, un neaiztiek entītijas, ko izslēdzis lietotājs.
 
+Radio AP režīmā tiek zīmēts kā `up` tad, kad interfeiss ir ieslēgts, nevis tikai
+tad, kad to saka `ifOperStatus`: RouterOS to interfeisu rāda kā `down`, kamēr
+neviens nav asociējies, kaut tas pats interfeiss tajā pašā brīdī ziņo trokšņu
+grīdu un pārraides kvalitāti, ko izslēgts radio dot nevarētu. AP, kurai neviens
+nav pieslēdzies, ir dīkstāvē, un krāsot to kā izslēgtu bija nepareizi.
+
 Priekšpanelī parādās arī radio — apaļoti bloki aiz portiem, ar joslas apzīmējumu
 `2.4G`, `5G`. Zaļš nozīmē, ka klienti ir pieslēgti, tumši zaļš — ka radio ir `up`,
 bet dīkstāvē, zils — ka radio pārvalda kontrolieris un šī iekārta savus klientus

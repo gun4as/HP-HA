@@ -220,6 +220,12 @@ only when an entity is created, so upgrading left them hidden; netviz now clears
 that flag on load where it set it itself, and leaves alone any entity the user
 disabled.
 
+A radio in AP mode is drawn as up whenever the interface is enabled, not only
+when `ifOperStatus` says so: RouterOS reports that interface down until a client
+associates, while the same interface reports a noise floor and a transmit quality
+that only a running radio could produce. An access point with nobody on it is
+idle, and colouring it like a disabled one was wrong.
+
 Radios appear on the faceplate too, as rounded blocks after the ports, labelled
 by band — `2.4G`, `5G`. Green means clients are attached, dark green means up and
 idle, blue means a controller manages the radio and this device cannot count its

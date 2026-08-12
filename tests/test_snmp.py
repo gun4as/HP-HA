@@ -647,6 +647,40 @@ async def test_a_controller_created_radio_gets_no_block(capac_silent):
     assert len(data["wireless"]["radios"]) == 2, "only the burned-in two"
 
 
+async def test_an_enabled_ap_with_nobody_on_it_is_not_down(rb951_idle):
+    """RouterOS reports ifOperStatus down on an AP-mode radio until someone joins.
+
+    The radio is enabled and beaconing; it just has no clients. Reading only
+    ifOperStatus put a working access point in the same colour as a disabled one,
+    which is the complaint this test exists to keep answered. ifAdminStatus plus
+    the existence of the mtxrWlAp row - which means AP mode - is what settles it.
+    """
+    ifindex = "2"
+    assert rb951_idle.walk(snmp.OID_IF_ADMIN)[ifindex] == "1", "fixture: enabled"
+    assert rb951_idle.walk(snmp.OID_IF_OPER)[ifindex] == "2", "fixture: oper down"
+
+    radios = (await FixtureClient(rb951_idle).poll(rb951_idle.physical_ports()))["wireless"]["radios"]
+    radio = radios[ifindex]
+    assert radio["up"] is True, "enabled and in AP mode is up, not down"
+    assert radio["managed"] is False
+    assert radio["clients"] == 0, "up with nobody on it is a real zero"
+    assert radio["ssid"], "nobody else is driving it, so its SSID is the one on air"
+
+
+async def test_the_idle_radio_is_measuring_the_air_around_it(rb951_idle):
+    """Why ifOperStatus down cannot mean the radio is off.
+
+    The same interface that reports down also reports a noise floor of about
+    -104 dBm and a transmit quality of 97%. A radio that was not running would
+    have nothing to say about either. This is the evidence behind reading such an
+    interface as up, and it is here so that reading cannot quietly be reverted.
+    """
+    radios = (await FixtureClient(rb951_idle).poll(rb951_idle.physical_ports()))["wireless"]["radios"]
+    radio = radios["2"]
+    assert -120 < radio["noise_floor"] < -50, "a real noise floor, in dBm"
+    assert 50 < radio["quality"] <= 100, "and a real transmit quality"
+
+
 async def test_a_standalone_radio_still_counts_its_own_clients(rb951):
     """The heuristic must not fire where no controller is involved.
 

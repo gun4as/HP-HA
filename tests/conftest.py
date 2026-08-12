@@ -141,6 +141,18 @@ def rb951() -> Snapshot:
 
 
 @pytest.fixture
+def rb951_idle() -> Snapshot:
+    """The same RB951G with nobody attached to it.
+
+    ifAdminStatus is up and mtxrWlAp has its row, but ifOperStatus reads down -
+    which is what RouterOS reports for a wireless interface in AP mode until a
+    client associates. Taken because netviz painted that the same grey as a
+    disabled radio, on an access point that was switched on and beaconing.
+    """
+    return Snapshot(FIXTURES / "rb951-idle.json")
+
+
+@pytest.fixture
 def capsman() -> Snapshot:
     """MikroTik hAP ac3 acting as CAPsMAN controller: 48 client registrations."""
     return Snapshot(FIXTURES / "capsman.json")
