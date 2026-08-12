@@ -566,3 +566,23 @@ async def test_a_radio_in_ap_mode_appears_even_with_no_clients(capsman):
     for radio in idle:
         assert radio["ssid"]
         assert radio["noise_floor"] is not None
+
+
+async def test_discovery_detects_poe_without_a_prior_probe(rb2011):
+    """The coordinator discovers ports before anything has probed the device.
+
+    Detection used to happen only in poll(), so discovery ran on the generic
+    profile, profile.poe was None, and not a single port was ever marked as PoE.
+    No PoE entities and no orange dots on any device added by discovery - which
+    is every MikroTik.
+    """
+    client = FixtureClient(rb2011)
+    assert client.profile.key == "generic", "fixture would not exercise the bug"
+
+    ports = await client.discover_ports()          # no _ensure_profile() first
+    assert client.profile.key == "routeros"
+    assert sum(1 for p in ports if p["poe"]) == 1
+
+    data = await client.poll(ports)
+    poe_port = next(p for p in data["ports"].values() if "poe_status" in p)
+    assert poe_port["poe_status"] in ("searching", "delivering", "disabled")

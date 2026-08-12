@@ -322,3 +322,54 @@ def test_the_crs309_rj45_is_drawn_on_the_right():
     drawn = {p["id"]: p["x"] for p in geometry["ports"]}
     assert drawn["ether1"] == max(drawn.values())
     assert drawn["sfp-sfpplus1"] == min(drawn.values())
+
+
+@pytest.mark.parametrize("path", TEMPLATES, ids=lambda p: p.stem)
+def test_template_labels_fit_their_slots(path):
+    """A slot is a fixed physical size, so the label has to shrink to it.
+
+    The automatic layout widens a port to fit its name; a template cannot, and
+    `sfp-sfpplus1` drawn in a 30 unit cage overlapped its neighbours into mush.
+    A front panel prints `SFP+ 1`, so the number is what belongs there.
+    """
+    data = _load(path)
+    names = ["sfp-sfpplus1", "sfp9", "sfp1", "ether10", "ether1uplink dsl"]
+    ports = [
+        {"id": f"{names[i % len(names)]}-{i}", "label": names[i % len(names)]}
+        for i in range(len(data["ports"]))
+    ]
+    # more realistic: give each slot a name of its own kind
+    ports = []
+    for slot in sorted(data["ports"], key=lambda s: s["index"]):
+        stem = "sfp-sfpplus" if slot["kind"] == "sfp+" else "ether"
+        ports.append({
+            "id": f"{stem}{slot['index'] + 1}",
+            "label": f"{stem}{slot['index'] + 1}",
+        })
+
+    geometry = model.template_geometry(data, ports)
+    assert geometry is not None
+    for port in geometry["ports"]:
+        assert model.fits(port["label"], port["w"]), (
+            f"{path.stem}: {port['label']!r} does not fit {port['w']} units"
+        )
+
+    labels = [p["label"] for p in geometry["ports"]]
+    assert len(labels) == len(set(labels)), f"{path.stem} draws two ports the same"
+
+
+def test_mixed_cages_get_a_kind_prefix():
+    """A CRS309 has both an SFP+ 1 and an ether1; a bare digit is ambiguous."""
+    ports = [{"id": f"sfp-sfpplus{i}", "label": f"sfp-sfpplus{i}"} for i in range(1, 9)]
+    ports.append({"id": "ether1", "label": "ether1"})
+    geometry = model.template_geometry(model.load_model("mikrotik_crs309"), ports)
+    labels = [p["label"] for p in geometry["ports"]]
+    assert labels == ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "E1"]
+
+
+def test_a_panel_with_unique_numbers_keeps_them_bare():
+    """The CRS112 prints 1 to 12, so that is what the card should show."""
+    ports = [{"id": f"ether{i}", "label": f"ether{i}"} for i in range(1, 9)]
+    ports += [{"id": f"sfp{i}", "label": f"sfp{i}"} for i in range(9, 13)]
+    geometry = model.template_geometry(model.load_model("mikrotik_crs112"), ports)
+    assert [p["label"] for p in geometry["ports"]] == [str(i) for i in range(1, 13)]

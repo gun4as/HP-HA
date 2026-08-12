@@ -401,6 +401,11 @@ class SnmpClient:
         the label and as the key, and renaming an interface does create new
         entities - the same trade-off the model files already make.
         """
+        # The coordinator calls this before poll(), which is where detection used
+        # to happen - so discovery ran on the generic profile, self.profile.poe
+        # was None, and not one port was ever marked as PoE. No PoE entities, no
+        # orange dots, on every device added by discovery.
+        await self._ensure_profile()
         types = await self.walk(OID_IF_TYPE)
         names = await self.walk(OID_IF_NAME)
         poe_ports: set[str] = set()

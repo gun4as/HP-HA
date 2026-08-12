@@ -78,6 +78,25 @@ def short_label(name: str) -> str:
     return text[:_LABEL_MAX]
 
 
+_RE_TRAILING_NUMBER = re.compile(r"(\d+)\D*$")
+
+
+def label_number(name: str) -> str | None:
+    """The port number out of an interface name, if it has one.
+
+    A front panel prints `SFP+ 1` and `ETH10`, not `sfp-sfpplus1` and `ether10`,
+    so when a name will not fit its slot the number is what the hardware itself
+    would have written there.
+    """
+    match = _RE_TRAILING_NUMBER.search(str(name).strip())
+    return match.group(1) if match else None
+
+
+def fits(text: str, width: int) -> bool:
+    """Whether a label drawn at the card's font size stays inside its slot."""
+    return len(text) * _CHAR_W <= width - 4
+
+
 def generated_geometry(ports: list[dict], display: str) -> dict:
     """Lay discovered ports out when no model file describes the hardware.
 
@@ -165,7 +184,6 @@ def template_geometry(model: dict, ports: list[dict]) -> dict | None:
         )
         return None
 
-    laid_out = []
     for slot in slots:
         index = slot.get("index")
         if not isinstance(index, int) or not 0 <= index < len(ports):
@@ -175,9 +193,34 @@ def template_geometry(model: dict, ports: list[dict]) -> dict | None:
                 index,
             )
             return None
-        port = ports[index]
-        name = str(port.get("label", port["id"]))
+
+    # A slot is a fixed physical size, so unlike the automatic layout the label
+    # cannot widen to fit - it has to shrink. Decided once for the whole
+    # faceplate rather than per slot, because a row reading "1 2 3 sfp9 sfp10"
+    # looks like a mistake even when every label technically fits.
+    names = [str(ports[slot["index"]].get("label", ports[slot["index"]]["id"]))
+             for slot in slots]
+    use_numbers = any(
+        not fits(short_label(name), slot["w"])
+        for name, slot in zip(names, slots)
+    )
+
+    numbers = [label_number(name) for name in names]
+    # A number alone is ambiguous where a panel mixes cages: a CRS309 has both an
+    # SFP+ 1 and an ether1, and the hardware tells them apart by the SFP+ and
+    # POE/BOOT markings rather than by the digit. Prefix with the kind only when
+    # the digits would actually collide.
+    prefix_kind = use_numbers and len(set(numbers)) < len(numbers)
+
+    laid_out = []
+    for slot, name, number in zip(slots, names, numbers):
+        port = ports[slot["index"]]
         label = short_label(name)
+        if use_numbers and number:
+            initial = "S" if slot.get("kind") == "sfp+" else "E"
+            label = f"{initial}{number}" if prefix_kind else number
+        if not fits(label, slot["w"]):
+            label = label[: max(1, int((slot["w"] - 4) // _CHAR_W))]
         laid_out.append({
             "id": str(port["id"]),
             "label": label,
