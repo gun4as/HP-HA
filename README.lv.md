@@ -288,19 +288,22 @@ Vairāk nekā nevajag — ne HA instalācijas, ne tīkla. `snmp.py`, `model.py` 
 `SnmpClient` strādā ar `walk()` un `get_many()`, kas baroti no ierakstīta
 snapshot'a. Viss virs tiem ir ražošanas koda ceļš.
 
-Trīs snapshot'i — no JL357A, MikroTik RB2011 un CAPsMAN kontroliera. Tie atšķiras
-noderīgi, un katra no zemāk minētajām atšķirībām deva nepareizu atbildi, kas
-izskatījās pareiza, līdz tests to pieķēra:
+Pieci snapshot'i: JL357A, MikroTik RB2011, CRS309 switch, atsevišķa AP un CAPsMAN
+kontrolieris. Tie atšķiras noderīgi, un katra no zemāk minētajām atšķirībām deva
+nepareizu atbildi, kas izskatījās pareiza, līdz tests to pieķēra:
 
 - RB2011 atstāj Q-BRIDGE egress tabulu tukšu, aizpildot `dot1qPvid`, un tāpēc
-  katrs ports iznāca kā `access`, ieskaitot trunkus
+  katrs ports iznāca kā `access`, ieskaitot trunkus — un CRS309 ir komplektā
+  tāpēc, ka switch bija acīmredzamais iebildums pret to secinājumu
 - tas atbild `entPhysicalSerialNum` ar `rb400_usb` no rindas, kuras
   `entPhysicalClass` ir `unknown` — virkne, kas ir vienāda katram RB2011, un kas
   būtu sadūrusi divas iekārtas uz viena unique_id
-- `hrProcessorLoad` atdod vienu vērtību uz vienas iekārtas un četras uz citas, ar
-  vienu un to pašu firmware
+- `hrProcessorLoad` atdod vienu vērtību uz vienas iekārtas, divas uz citas un
+  četras uz trešās, visas ar to pašu firmware saimi
 - `sysObjectID` atnāk kā `SNMPv2-SMI::enterprises.11...`, ne punktotā formā, jo
   pysnmp OID izdrukā caur saviem MIB
+- atsevišķa AP savus klientus glabā citā tabulā nekā CAPsMAN kontrolieris, un tai
+  tabulai nav SSID kolonnas
 
 Testi nekad neaiztiek dzelzi. Snapshot ņem divos soļos, un otrais ir obligāts:
 
@@ -348,6 +351,8 @@ MikroTik RouterOS:
 |---|---|---|
 | mtxrSerialNumber | `1.3.6.1.4.1.14988.1.1.7.3.0` | MIKROTIK-MIB |
 | mtxrPOEStatus / Power | `1.3.6.1.4.1.14988.1.1.15.1.1.3` / `.6` | MIKROTIK-MIB |
+| mtxrWlApSsid / Clients / Noise / CCQ | `1.3.6.1.4.1.14988.1.1.1.3.1.4` / `.6` / `.9` / `.10` | MIKROTIK-MIB |
+| mtxrWlRtab — lokālie klienti | `1.3.6.1.4.1.14988.1.1.1.2.1.3` | MIKROTIK-MIB |
 | hrProcessorLoad | `1.3.6.1.2.1.25.3.3.1.2` | HOST-RESOURCES-MIB |
 | hrStorage — atmiņa | `1.3.6.1.2.1.25.2.3.1.3` … `.6` | HOST-RESOURCES-MIB |
 | CAPsMAN reģistrācijas | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |

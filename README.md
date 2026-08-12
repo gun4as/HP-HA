@@ -312,19 +312,22 @@ their files, so a real `SnmpClient` runs with only `walk()` and `get_many()` fed
 from a recorded snapshot. Everything above those two methods is the production
 code path.
 
-Three snapshots, from a JL357A, a MikroTik RB2011 and a CAPsMAN controller. They
-disagree in useful ways, and every disagreement below produced a wrong answer
-that looked like a right one until a test pinned it:
+Five snapshots: a JL357A, a MikroTik RB2011, a CRS309 switch, a standalone AP
+and a CAPsMAN controller. They disagree in useful ways, and every disagreement
+below produced a wrong answer that looked like a right one until a test pinned it:
 
 - the RB2011 leaves the Q-BRIDGE egress table empty while filling `dot1qPvid`,
-  which made every port come out as `access`, trunks included
+  which made every port come out as `access`, trunks included — and the CRS309 is
+  in the set because a switch was the obvious objection to that conclusion
 - it answers `entPhysicalSerialNum` with `rb400_usb` from a row whose
   `entPhysicalClass` is `unknown` — a string identical on every RB2011, which
   would have collided two devices onto one unique_id
-- `hrProcessorLoad` returns one value on one device and four on another, on the
-  same firmware version
+- `hrProcessorLoad` returns one value on one device, two on another and four on a
+  third, all on the same firmware family
 - `sysObjectID` arrives as `SNMPv2-SMI::enterprises.11...` rather than the dotted
   form, because pysnmp renders OIDs through its MIBs
+- a standalone access point keeps its clients in a different table from a CAPsMAN
+  controller, and that table has no SSID column
 
 The tests never touch hardware — they run against snapshots taken from real
 devices and then scrubbed. Two steps, and the second one is mandatory:
@@ -374,6 +377,8 @@ MikroTik RouterOS:
 |---|---|---|
 | mtxrSerialNumber | `1.3.6.1.4.1.14988.1.1.7.3.0` | MIKROTIK-MIB |
 | mtxrPOEStatus / Power | `1.3.6.1.4.1.14988.1.1.15.1.1.3` / `.6` | MIKROTIK-MIB |
+| mtxrWlApSsid / Clients / Noise / CCQ | `1.3.6.1.4.1.14988.1.1.1.3.1.4` / `.6` / `.9` / `.10` | MIKROTIK-MIB |
+| mtxrWlRtab — local clients | `1.3.6.1.4.1.14988.1.1.1.2.1.3` | MIKROTIK-MIB |
 | hrProcessorLoad | `1.3.6.1.2.1.25.3.3.1.2` | HOST-RESOURCES-MIB |
 | hrStorage — memory | `1.3.6.1.2.1.25.2.3.1.3` … `.6` | HOST-RESOURCES-MIB |
 | CAPsMAN registrations | `1.3.6.1.4.1.14988.1.1.1.5` | MIKROTIK-MIB |
