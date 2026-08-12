@@ -446,6 +446,12 @@ back as `unknown` rather than `0`, its faceplate block is blue rather than green
 and the tooltip says the clients are counted on the controller. A zero there
 would paint an idle radio on an access point carrying eighteen clients.
 
+Two identical access points can therefore end up labelled differently — one
+`2.4G`/`5G` and the other `wlan1`/`wlan2` — and that is the devices disagreeing,
+not the card. The band comes from the frequency in `mtxrWlAp`, an access point
+whose local AP configuration was removed reports no such row, and naming the band
+from the interface instead would be a guess. The tooltip says so on the block.
+
 The radios still get drawn, though, because they are the access point's own
 hardware and they are transmitting. Which of them are real comes from the MAC
 address: bit 1 of the first octet is IEEE's locally-administered flag, clear on

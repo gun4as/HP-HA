@@ -480,6 +480,10 @@ class NetvizFaceplateCard extends HTMLElement {
       }
       if (attrs.ssid) lines.push(attrs.ssid);
       lines.push(up ? "up" : "down");
+      // Why two identical access points can be labelled differently: the band
+      // comes from the frequency, and a device with no local AP configuration
+      // reports none. Naming the band from the interface would be a guess.
+      if (!attrs.band) lines.push("band unknown - the device reports no frequency");
       if (attrs.managed) {
         lines.push("managed by a controller - clients are counted there");
       } else if (Number.isFinite(clients)) {
@@ -552,4 +556,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.5 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.6 ", "background:#2ea3f2;color:#fff", "");

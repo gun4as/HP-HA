@@ -417,6 +417,12 @@ nevis `0`, tā bloks priekšpanelī ir zils, nevis zaļš, un tooltip pasaka, ka
 klienti tiek skaitīti uz kontroliera. Nulle tur uzzīmētu dīkstāves radio uz AP,
 kas nes astoņpadsmit klientus.
 
+Tāpēc divas vienādas AP var iznākt ar atšķirīgiem apzīmējumiem — vienai `2.4G`/`5G`,
+otrai `wlan1`/`wlan2` — un tā ir iekārtu, nevis kartes atšķirība. Josla nāk no
+frekvences `mtxrWlAp` tabulā; AP, kurai vietējā AP konfigurācija ir noņemta, tādas
+rindas nav, un nosaukt joslu pēc interfeisa būtu minējums. Tooltip to pasaka uz
+paša bloka.
+
 Radio tomēr tiek uzzīmēti, jo tie ir tās AP paša dzelzs un tie raida. Kurš no
 tiem ir īsts, pasaka MAC adrese: pirmā okteta 1. bits ir IEEE *locally
 administered* karodziņš — nulle adresei, kas iededzināta NIC, un viens tādai, ko
