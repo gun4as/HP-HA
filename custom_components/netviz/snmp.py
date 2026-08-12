@@ -188,6 +188,19 @@ def _as_int(value, default: int | None = None) -> int | None:
         return default
 
 
+def _band_of(frequency: int | None) -> str | None:
+    """A short band label from a channel frequency in MHz."""
+    if frequency is None:
+        return None
+    if 2000 <= frequency < 3000:
+        return "2.4G"
+    if 4900 <= frequency < 5900:
+        return "5G"
+    if 5900 <= frequency < 7200:
+        return "6G"
+    return None
+
+
 def _portlist(raw: bytes) -> set[int]:
     """Q-BRIDGE PortList bitmap -> set of dot1dBasePort numbers."""
     ports: set[int] = set()
@@ -484,7 +497,7 @@ class SnmpClient:
         self._vlan_cache = (now, result)
         return result
 
-    async def _wireless(self, names: dict) -> dict:
+    async def _wireless(self, names: dict, oper: dict | None = None) -> dict:
         """Wireless clients, aggregated.
 
         Read from a CAPsMAN controller, this covers every access point it
@@ -560,7 +573,7 @@ class SnmpClient:
             bucket["signal_min"] = min(found) if found else None
             bucket["signal_max"] = max(found) if found else None
 
-        self._merge_local_radios(names, by_radio, local)
+        self._merge_local_radios(names, by_radio, local, oper)
 
         return {
             "clients": len(registrations) + len(local_signals),
@@ -587,20 +600,28 @@ class SnmpClient:
         clients = await self.walk(source.ap_clients_oid) if source.ap_clients_oid else {}
         noise = await self.walk(source.ap_noise_oid) if source.ap_noise_oid else {}
         quality = await self.walk(source.ap_ccq_oid) if source.ap_ccq_oid else {}
+        freq = await self.walk(source.ap_freq_oid) if source.ap_freq_oid else {}
         return {
             index.split(".")[0]: {
                 "ssid": str(raw).strip() or None,
                 "clients": _as_int(clients.get(index), 0) or 0,
                 "noise_floor": _as_int(noise.get(index)),
                 "quality": _as_int(quality.get(index)),
+                "frequency": _as_int(freq.get(index)),
+                "band": _band_of(_as_int(freq.get(index))),
             }
             for index, raw in ssids.items()
         }
 
     def _merge_local_radios(
-        self, names: dict, by_radio: dict, local: dict[str, dict]
+        self,
+        names: dict,
+        by_radio: dict,
+        local: dict[str, dict],
+        oper: dict | None = None,
     ) -> None:
         """Attach what a locally served radio says about itself."""
+        oper = oper or {}
         for ifindex, info in local.items():
             radio = by_radio.setdefault(
                 ifindex,
@@ -615,6 +636,11 @@ class SnmpClient:
             radio["ssid"] = info["ssid"]
             radio["noise_floor"] = info["noise_floor"]
             radio["quality"] = info["quality"]
+            radio["frequency"] = info["frequency"]
+            radio["band"] = info["band"]
+            # A radio configured in AP mode still has a row when it is down, and
+            # "up with nobody attached" is a different thing from "not running".
+            radio["up"] = _as_int(oper.get(ifindex)) == 1
             # Counting registrations is exact and per-client; the radio's own
             # tally is the fallback for when no registration table answered.
             if not radio["clients"]:
@@ -696,7 +722,9 @@ class SnmpClient:
             elif memory and memory.storage_match:
                 mem_free, mem_used = await self._storage(memory.storage_match)
 
-            wireless = await self._wireless(names) if self.profile.wireless else {}
+            wireless = (
+                await self._wireless(names, oper) if self.profile.wireless else {}
+            )
 
             main_power = await self.walk(poe.main_power_oid) if (
                 poe and poe.main_power_oid

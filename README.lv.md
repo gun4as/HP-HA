@@ -196,6 +196,13 @@ Karte ņem ģeometriju no `faceplate` entītijas atribūtiem un stāvokli no pā
 tās pašas ierīces entītijām. Portus tā savāc pēc `port` un `metric` atribūtiem,
 **nevis** pēc entity_id — pārsaukšana neko nesalauž.
 
+Priekšpanelī parādās arī radio — apaļoti bloki aiz portiem, ar joslas apzīmējumu
+`2.4G`, `5G`. Zaļš nozīmē, ka klienti ir pieslēgti, tumši zaļš — ka radio ir `up`,
+bet dīkstāvē, pelēks — ka tas nestrādā; tooltip ir SSID, klientu skaits, vidējais
+signāls, trokšņu grīda un pārraides kvalitāte. Bloku dabū tikai tie radio, ko
+iekārta apkalpo pati: CAPsMAN kontrolieris ziņo vienu uz katru pārvaldīto AP, un
+tie pieder tās AP priekšpanelim, kurai tie ir.
+
 Krāsas: zaļa 1G, zila 10G, dzintars 10/100M, pelēka down. Oranžs punkts nozīmē,
 ka ports padod PoE jaudu; normālā izmērā tas ir stūrī, bet, kad etiķetes ir
 paslēptas, pārvietojas uz porta vidu. Klikšķis atver porta more-info.

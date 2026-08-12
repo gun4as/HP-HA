@@ -155,6 +155,56 @@ def generated_geometry(ports: list[dict], display: str) -> dict:
     }
 
 
+_RADIO_W, _RADIO_H = 34, 18
+
+
+def radio_slots(radios: dict, x: int, y: int) -> list[dict]:
+    """Blocks for the radios a device serves itself, placed after the ports.
+
+    A radio is not a socket on a front panel, but the card is a summary of what
+    the device is doing rather than a photograph, and on an access point the
+    radios are the interesting half. Only locally served radios get a block -
+    a controller reports a radio for every managed AP, and those belong to the
+    other device's faceplate, not to this one.
+    """
+    slots = []
+    for offset, (ifindex, radio) in enumerate(
+        sorted(
+            ((i, r) for i, r in radios.items() if "ssid" in r),
+            key=lambda kv: (kv[1].get("frequency") or 0, int(kv[0])),
+        )
+    ):
+        slots.append({
+            "id": f"radio-{ifindex}",
+            "label": radio.get("band") or short_label(radio.get("name", "")),
+            "kind": "radio",
+            "x": x + offset * (_RADIO_W + _GAP_X),
+            "y": y,
+            "w": _RADIO_W,
+            "h": _RADIO_H,
+        })
+    return slots
+
+
+def with_radios(geometry: dict, radios: dict) -> dict:
+    """Widen a faceplate to make room for its radios."""
+    if not geometry.get("ports") or not radios:
+        return geometry
+    ports = geometry["ports"]
+    x = max(p["x"] + p["w"] for p in ports) + _BLOCK_GAP
+    y = min(p["y"] for p in ports)
+    slots = radio_slots(radios, x, y)
+    if not slots:
+        return geometry
+    width = max(s["x"] + s["w"] for s in slots) + _MARGIN_X
+    return {
+        **geometry,
+        "width": width,
+        "viewbox": f"0 0 {width} {geometry['height']}",
+        "radios": slots,
+    }
+
+
 def is_template(model: dict) -> bool:
     """A template carries geometry only; its ports come from the device."""
     return bool(model) and model.get("match") == "order"

@@ -122,6 +122,7 @@ class WirelessSource:
     local_signal_oid: str | None = None
     ap_ssid_oid: str | None = None
     ap_clients_oid: str | None = None
+    ap_freq_oid: str | None = None
     ap_noise_oid: str | None = None
     ap_ccq_oid: str | None = None
 
@@ -198,6 +199,7 @@ ROUTEROS = Profile(
         local_signal_oid="1.3.6.1.4.1.14988.1.1.1.2.1.3",
         ap_ssid_oid="1.3.6.1.4.1.14988.1.1.1.3.1.4",
         ap_clients_oid="1.3.6.1.4.1.14988.1.1.1.3.1.6",
+        ap_freq_oid="1.3.6.1.4.1.14988.1.1.1.3.1.7",
         ap_noise_oid="1.3.6.1.4.1.14988.1.1.1.3.1.9",
         ap_ccq_oid="1.3.6.1.4.1.14988.1.1.1.3.1.10",
     ),

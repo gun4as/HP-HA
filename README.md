@@ -212,6 +212,13 @@ The card takes its geometry from the `faceplate` entity attributes and the live
 state from the other entities of the same device. It collects ports by their
 `port` and `metric` attributes, **not** by entity_id — renaming breaks nothing.
 
+Radios appear on the faceplate too, as rounded blocks after the ports, labelled
+by band — `2.4G`, `5G`. Green means clients are attached, dark green means up and
+idle, grey means not running, and the tooltip carries the SSID, client count,
+average signal, noise floor and transmit quality. Only radios the device serves
+itself get a block: a CAPsMAN controller reports one per managed access point,
+and those belong on the faceplate of the access point that has them.
+
 Colours: green 1G, blue 10G, amber 10/100M, grey down. An orange dot means the
 port is delivering PoE; it sits in the corner at normal size and moves to the
 middle of the port once the labels are hidden. Clicking a port opens its

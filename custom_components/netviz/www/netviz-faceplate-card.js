@@ -26,6 +26,12 @@ const LABEL_FONT_SIZE = 8;
 // colours and the tooltip. The switch's own web UI does the same when small.
 const LABEL_MIN_PX = 5.5;
 
+// A radio is drawn like a socket but coloured by what it is doing: serving
+// clients, up and idle, or not running at all.
+const RADIO_BUSY = "#3ec46d";
+const RADIO_IDLE = "#2e7d4f";
+const RADIO_DOWN = "var(--disabled-color, #6f7378)";
+
 const LINK_COLORS = {
   down: "var(--disabled-color, #6f7378)",
   10: "#f2b632",
@@ -100,7 +106,9 @@ class NetvizFaceplateCard extends HTMLElement {
    */
   _entityMap() {
     const hass = this._hass;
-    const expected = Object.keys(this._portNodes || {}).length;
+    const expected =
+      Object.keys(this._portNodes || {}).length +
+      Object.keys(this._radioNodes || {}).length;
     if (
       this._map &&
       this._mapSource === hass.entities &&
@@ -236,6 +244,39 @@ class NetvizFaceplateCard extends HTMLElement {
       this._portNodes[port.id] = { body, poeDot, tooltip, def: port };
     }
 
+    this._radioNodes = {};
+    for (const radio of geometry.radios || []) {
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.style.cursor = "pointer";
+
+      const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      body.setAttribute("x", radio.x);
+      body.setAttribute("y", radio.y);
+      body.setAttribute("width", radio.w);
+      body.setAttribute("height", radio.h);
+      body.setAttribute("rx", "9");
+      body.setAttribute("stroke", "var(--divider-color, #555)");
+      body.setAttribute("stroke-width", "1");
+      group.appendChild(body);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", Number(radio.x) + Number(radio.w) / 2);
+      label.setAttribute("y", Number(radio.y) + Number(radio.h) / 2 + 3);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", String(LABEL_FONT_SIZE));
+      label.setAttribute("fill", "var(--primary-text-color, #eee)");
+      label.setAttribute("pointer-events", "none");
+      label.textContent = radio.label;
+      group.appendChild(label);
+      this._labels.push(label);
+
+      const tooltip = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      group.appendChild(tooltip);
+      group.addEventListener("click", () => this._openPort(radio.id));
+      svg.appendChild(group);
+      this._radioNodes[radio.id] = { body, tooltip, def: radio };
+    }
+
     wrap.appendChild(svg);
 
     const legend = document.createElement("div");
@@ -258,7 +299,15 @@ class NetvizFaceplateCard extends HTMLElement {
       `<span style="display:inline-flex;align-items:center;gap:5px">
          <span style="width:9px;height:9px;border-radius:50%;background:${POE_COLOR};
                       box-shadow:0 0 0 1px ${POE_OUTLINE}"></span>PoE
-       </span>`;
+       </span>` +
+      ((geometry.radios || []).length
+        ? `<span style="display:inline-flex;align-items:center;gap:5px">
+             <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_BUSY}"></span>radio
+           </span>
+           <span style="display:inline-flex;align-items:center;gap:5px">
+             <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_IDLE}"></span>idle
+           </span>`
+        : "");
     wrap.appendChild(legend);
 
     this._summary = document.createElement("div");
@@ -379,15 +428,48 @@ class NetvizFaceplateCard extends HTMLElement {
       node.tooltip.textContent = lines.join(" · ");
     }
 
+    let radioClients = 0;
+    for (const [radioId, node] of Object.entries(this._radioNodes || {})) {
+      const state = (states[radioId] || {}).radio;
+      const attrs = (state && state.attributes) || {};
+      const clients = state ? Number(state.state) : NaN;
+      const up = attrs.up !== false;
+
+      let colour = RADIO_DOWN;
+      if (state && up) colour = clients > 0 ? RADIO_BUSY : RADIO_IDLE;
+      node.body.setAttribute("fill", colour);
+      if (Number.isFinite(clients)) radioClients += clients;
+
+      const lines = [attrs.interface || node.def.label];
+      if (attrs.ssid) lines.push(attrs.ssid);
+      lines.push(up ? "up" : "down");
+      if (Number.isFinite(clients)) {
+        lines.push(`${clients} client${clients === 1 ? "" : "s"}`);
+      }
+      if (attrs.signal_avg != null) lines.push(`avg ${attrs.signal_avg} dBm`);
+      if (attrs.noise_floor != null) lines.push(`noise ${attrs.noise_floor} dBm`);
+      if (attrs.quality != null) lines.push(`CCQ ${attrs.quality}%`);
+      node.tooltip.textContent = lines.join(" · ");
+    }
+
     const total = Object.keys(this._portNodes).length;
     this._summary.textContent =
       `${up}/${total} up` +
-      (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "");
+      (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "") +
+      (Object.keys(this._radioNodes || {}).length
+        ? ` · ${radioClients} wireless`
+        : "");
   }
 
   /** Clicking a port opens the more-info dialog of its link entity. */
   _openPort(portId) {
     const states = this._portStates()[portId];
+    if (states && states.radio) {
+      const event = new Event("hass-more-info", { bubbles: true, composed: true });
+      event.detail = { entityId: states.radio.entity_id };
+      this.dispatchEvent(event);
+      return;
+    }
     if (!states) return;
     const target = states.link || Object.values(states)[0];
     if (!target) return;
@@ -414,4 +496,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.4.0 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.1 ", "background:#2ea3f2;color:#fff", "");

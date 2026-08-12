@@ -44,6 +44,7 @@ from .model import (
     generated_geometry,
     is_template,
     template_geometry,
+    with_radios,
 )
 
 
@@ -274,11 +275,15 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
     _attr_translation_key = "radio_clients"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:access-point"
-    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self, coordinator: NetvizCoordinator, ifindex: str, name: str
     ) -> None:
+        # A radio this device serves itself is one of two or three and belongs on
+        # its faceplate, so it is on by default. A controller reports one per
+        # managed access point, which is a long list of somebody else's radios.
+        radio = coordinator.wireless.get("radios", {}).get(ifindex, {})
+        self._attr_entity_registry_enabled_default = "ssid" in radio
         # Keyed by ifIndex rather than by name: a CAPsMAN interface is named
         # after the access point and the band, and renaming either should not
         # orphan the history.
@@ -298,13 +303,17 @@ class NetvizRadioSensor(NetvizEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         bucket = self._bucket
         attrs = {
+            # The card collects entities by `port` and `metric`, the same way it
+            # does for sockets, so a radio has to speak that language too.
+            "port": f"radio-{self._ifindex}",
+            "metric": "radio",
             "interface": bucket.get("name"),
             "signal_avg": bucket.get("signal_avg"),
             "signal_min": bucket.get("signal_min"),
             "signal_max": bucket.get("signal_max"),
         }
         # Only a radio the device serves itself reports these
-        for key in ("ssid", "noise_floor", "quality"):
+        for key in ("ssid", "noise_floor", "quality", "band", "frequency", "up"):
             if key in bucket:
                 attrs[key] = bucket[key]
         return attrs
@@ -365,13 +374,16 @@ class NetvizFaceplateSensor(NetvizEntity, SensorEntity):
         elif coordinator.model.get("ports"):
             geometry = faceplate_geometry(coordinator.model)
         if geometry is not None:
-            self._geometry = geometry
+            self._geometry = with_radios(geometry, coordinator.wireless.get("radios", {}))
         else:
             # No model file: lay the discovered ports out so the card has
             # something to draw. It is a drawing of a port list rather than of
             # a chassis, and it says so through the `generated` flag.
-            self._geometry = generated_geometry(
-                coordinator.ports, coordinator.config_entry.title
+            self._geometry = with_radios(
+                generated_geometry(
+                    coordinator.ports, coordinator.config_entry.title
+                ),
+                coordinator.wireless.get("radios", {}),
             )
 
     @property

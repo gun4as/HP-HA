@@ -373,3 +373,70 @@ def test_a_panel_with_unique_numbers_keeps_them_bare():
     ports += [{"id": f"sfp{i}", "label": f"sfp{i}"} for i in range(9, 13)]
     geometry = model.template_geometry(model.load_model("mikrotik_crs112"), ports)
     assert [p["label"] for p in geometry["ports"]] == [str(i) for i in range(1, 13)]
+
+
+# ------------------------------------------------------------------ radio blocks
+
+
+def _radio(ifindex, band=None, ssid="net", clients=0, name="wlan1"):
+    radio = {"name": name, "clients": clients, "signal_avg": None,
+             "signal_min": None, "signal_max": None}
+    if ssid is not None:
+        radio |= {"ssid": ssid, "noise_floor": -95, "quality": 70,
+                  "frequency": 2412 if band == "2.4G" else 5180, "band": band,
+                  "up": True}
+    return {ifindex: radio}
+
+
+def test_radios_are_appended_and_the_faceplate_widens():
+    ports = [{"id": f"ether{i}", "label": f"ether{i}"} for i in range(1, 6)]
+    base = model.generated_geometry(ports, "ap")
+    radios = _radio("1", "2.4G") | _radio("2", "5G", name="wlan2")
+
+    grown = model.with_radios(base, radios)
+    assert len(grown["radios"]) == 2
+    assert [r["label"] for r in grown["radios"]] == ["2.4G", "5G"]
+    assert grown["width"] > base["width"]
+    assert grown["viewbox"] == f"0 0 {grown['width']} {grown['height']}"
+
+    # a radio block must not land on top of a port, or on another radio
+    boxes = [(p["id"], p["x"], p["y"], p["w"], p["h"])
+             for p in grown["ports"] + grown["radios"]]
+    for i, (id_a, ax, ay, aw, ah) in enumerate(boxes):
+        for id_b, bx, by, bw, bh in boxes[i + 1:]:
+            assert not (ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah), (
+                f"{id_a} overlaps {id_b}"
+            )
+
+
+def test_only_radios_the_device_serves_itself_get_a_block():
+    """A controller reports one radio per managed AP; those are not its own.
+
+    They belong on the faceplate of the access point that has them, not on the
+    controller's, and a controller with four APs would otherwise grow a row of
+    nine blocks for hardware sitting in other rooms.
+    """
+    ports = [{"id": "ether1", "label": "ether1"}]
+    radios = _radio("1", "2.4G")                      # locally served
+    radios |= {"258": {"name": "24Ghz-remote-1", "clients": 22,
+                       "signal_avg": -54, "signal_min": -70, "signal_max": -37}}
+    grown = model.with_radios(model.generated_geometry(ports, "ctl"), radios)
+    assert [r["id"] for r in grown["radios"]] == ["radio-1"]
+
+
+def test_radios_are_ordered_by_frequency():
+    radios = _radio("7", "5G", name="wlan2") | _radio("3", "2.4G")
+    grown = model.with_radios(
+        model.generated_geometry([{"id": "ether1", "label": "ether1"}], "ap"), radios
+    )
+    assert [r["label"] for r in grown["radios"]] == ["2.4G", "5G"]
+    assert grown["radios"][0]["x"] < grown["radios"][1]["x"]
+
+
+def test_a_device_without_radios_is_left_alone():
+    ports = [{"id": "1", "label": "1"}]
+    base = model.generated_geometry(ports, "switch")
+    assert model.with_radios(base, {}) == base
+    # ...and so is one whose only radios belong to other access points
+    managed = {"258": {"name": "24Ghz-remote-1", "clients": 3}}
+    assert model.with_radios(base, managed) == base
