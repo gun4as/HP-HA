@@ -44,6 +44,7 @@ from .const import (
     DEFAULT_PROTOCOL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MODEL_AUTO,
     PRIV_PROTOCOL_OPTIONS,
     PROTOCOL_OPTIONS,
     SNMP_VERSIONS,
@@ -121,11 +122,20 @@ class NetvizConfigFlow(ConfigFlow, domain=DOMAIN):
         return vol.Schema(
             {
                 vol.Required(CONF_HOST): TextSelector(),
-                vol.Required(CONF_MODEL): SelectSelector(
+                # A model file only adds faceplate geometry. Ports themselves
+                # come from the device, so requiring one would mean nobody
+                # could add hardware until someone had drawn it.
+                vol.Required(CONF_MODEL, default=MODEL_AUTO): SelectSelector(
                     SelectSelectorConfig(
                         options=[
-                            {"value": slug, "label": label}
-                            for slug, label in models.items()
+                            {
+                                "value": MODEL_AUTO,
+                                "label": "Detect ports automatically",
+                            },
+                            *(
+                                {"value": slug, "label": label}
+                                for slug, label in models.items()
+                            ),
                         ],
                         mode=SelectSelectorMode.DROPDOWN,
                     )
@@ -216,6 +226,7 @@ class NetvizConfigFlow(ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured(updates={CONF_HOST: self._data[CONF_HOST]})
 
         self._data["serial"] = serial
+        self._data["profile"] = info.get("profile")
         return self.async_create_entry(
             title=info.get("name") or self._data[CONF_HOST],
             data=self._data,

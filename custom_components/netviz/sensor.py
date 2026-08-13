@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -20,6 +21,7 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -39,7 +41,54 @@ from .const import (
 )
 from .coordinator import NetvizConfigEntry, NetvizCoordinator
 from .entity import NetvizEntity, NetvizPortEntity
-from .model import faceplate_geometry
+from .model import (
+    faceplate_geometry,
+    generated_geometry,
+    is_template,
+    template_geometry,
+    with_radios,
+)
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _undo_our_own_disable(
+    hass: HomeAssistant, coordinator: NetvizCoordinator
+) -> None:
+    """Re-enable a radio sensor this integration itself disabled.
+
+    Radio sensors shipped disabled by default in an earlier version, because back
+    then the only device reporting any was a controller listing somebody else's
+    radios. `entity_registry_enabled_default` applies once, when the entity is
+    created, so changing that default left every already-created one hidden - on
+    exactly the access points whose radios are the interesting half. The card then
+    drew a block with no entity behind it and no reload could help, because HA
+    never re-enables an entity on its own. The same applies to the controller's
+    provisioned interfaces, which were disabled on the same reasoning and for the
+    same span of versions.
+
+    Only a disable recorded as the integration's own is cleared. One the user made
+    is theirs, and stays. Done before the entities are added, so the platform sees
+    the cleared flag and adds them in the same pass.
+    """
+    registry = er.async_get(hass)
+    entry_id = coordinator.config_entry.entry_id
+    for ifindex in coordinator.wireless.get("radios", {}):
+        entity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry_id}_wifi_radio_{ifindex}"
+        )
+        if entity_id is None:
+            continue
+        existing = registry.async_get(entity_id)
+        if existing is None or existing.disabled_by is not er.RegistryEntryDisabler.INTEGRATION:
+            continue
+        _LOGGER.info(
+            "%s: re-enabling %s, which an earlier version of netviz disabled",
+            coordinator.config_entry.title,
+            entity_id,
+        )
+        registry.async_update_entity(entity_id, disabled_by=None)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -197,6 +246,19 @@ async def async_setup_entry(
     ]
     entities.append(NetvizFaceplateSensor(coordinator))
 
+    # Wireless only exists where a device reports any. Anything else returns an
+    # empty aggregate and gets no entities rather than a row of zeroes.
+    if wireless := coordinator.wireless:
+        _undo_our_own_disable(hass, coordinator)
+        entities.append(
+            NetvizSystemSensor(coordinator, WIRELESS_CLIENTS_SENSOR)
+        )
+        entities += [NetvizSsidSensor(coordinator, ssid) for ssid in wireless["ssids"]]
+        entities += [
+            NetvizRadioSensor(coordinator, ifindex, radio["name"])
+            for ifindex, radio in wireless["radios"].items()
+        ]
+
     for port_def in coordinator.ports:
         for metric in enabled:
             description = PORT_SENSORS.get(metric)
@@ -207,6 +269,113 @@ async def async_setup_entry(
             entities.append(NetvizPortSensor(coordinator, port_def, description))
 
     async_add_entities(entities)
+
+
+WIRELESS_CLIENTS_SENSOR = NetvizSensorDescription(
+    key="wireless_clients",
+    translation_key="wireless_clients",
+    state_class=SensorStateClass.MEASUREMENT,
+    icon="mdi:wifi",
+    value_fn=lambda s: s.get("wireless_clients"),
+)
+
+
+class NetvizSsidSensor(NetvizEntity, SensorEntity):
+    """How many clients are on one SSID, across every managed access point."""
+
+    _attr_translation_key = "ssid_clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:wifi"
+
+    def __init__(self, coordinator: NetvizCoordinator, ssid: str) -> None:
+        super().__init__(coordinator, f"wifi_ssid_{ssid}")
+        self._ssid = ssid
+        self._attr_translation_placeholders = {"ssid": ssid}
+
+    @property
+    def _bucket(self) -> dict:
+        return self.coordinator.wireless.get("ssids", {}).get(self._ssid, {})
+
+    @property
+    def native_value(self):
+        # An SSID that has gone quiet has no row at all, and zero is the honest
+        # answer for it - unlike a radio that has genuinely disappeared.
+        return self._bucket.get("clients", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        bucket = self._bucket
+        return {
+            "ssid": self._ssid,
+            "signal_avg": bucket.get("signal_avg"),
+            "signal_min": bucket.get("signal_min"),
+            "signal_max": bucket.get("signal_max"),
+        }
+
+
+class NetvizRadioSensor(NetvizEntity, SensorEntity):
+    """Clients on one radio of one access point, as the controller sees it."""
+
+    _attr_translation_key = "radio_clients"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:access-point"
+
+    def __init__(
+        self, coordinator: NetvizCoordinator, ifindex: str, name: str
+    ) -> None:
+        # On by default, including the interfaces a controller provisions for the
+        # access points it manages. Those were off at first, on the reasoning that
+        # they are somebody else's radios - but a controller's wireless view is
+        # the reason to point netviz at one at all, and having to enable
+        # twenty-one entities by hand to get it is not a sensible default. It is
+        # radios, not clients, so the count stays bounded by the estate.
+        # Keyed by ifIndex rather than by name: a CAPsMAN interface is named
+        # after the access point and the band, and renaming either should not
+        # orphan the history.
+        super().__init__(coordinator, f"wifi_radio_{ifindex}")
+        self._ifindex = ifindex
+        self._attr_translation_placeholders = {"radio": name}
+
+    @property
+    def _bucket(self) -> dict:
+        return self.coordinator.wireless.get("radios", {}).get(self._ifindex, {})
+
+    @property
+    def native_value(self):
+        # None where a controller manages the radio: its own tally counts the
+        # local SSID nobody is using, and zero would be a false measurement.
+        return self._bucket.get("clients")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        bucket = self._bucket
+        attrs = {
+            # The card collects entities by `port` and `metric`, the same way it
+            # does for sockets, so a radio has to speak that language too.
+            "port": f"radio-{self._ifindex}",
+            "metric": "radio",
+            "interface": bucket.get("name"),
+            "signal_avg": bucket.get("signal_avg"),
+            "signal_min": bucket.get("signal_min"),
+            "signal_max": bucket.get("signal_max"),
+        }
+        # Only a radio the device serves itself reports these
+        for key in (
+            "ssid",
+            "noise_floor",
+            "quality",
+            "band",
+            "frequency",
+            # RouterOS states a channel as frequency/width/protocol(power); kept
+            # whole, because the width and the protocol are worth having and are
+            # not worth pretending to parse into separate claims.
+            "channel",
+            "up",
+            "managed",
+        ):
+            if key in bucket:
+                attrs[key] = bucket[key]
+        return attrs
 
 
 class NetvizPortSensor(NetvizPortEntity, SensorEntity):
@@ -242,6 +411,16 @@ class NetvizSystemSensor(NetvizEntity, SensorEntity):
     def native_value(self):
         return self.entity_description.value_fn(self.coordinator.system)
 
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        # The device total is the only honest wireless figure on a controller:
+        # its own radios are provisioned and report nothing, while the clients
+        # sit on interfaces that belong to other access points' faceplates. The
+        # card looks entities up by port and metric, so it needs those here.
+        if self.entity_description.key != "wireless_clients":
+            return None
+        return {"port": "system", "metric": "wireless_clients"}
+
 
 class NetvizFaceplateSensor(NetvizEntity, SensorEntity):
     """Carries the faceplate geometry in its attributes, so the card needs to
@@ -258,7 +437,23 @@ class NetvizFaceplateSensor(NetvizEntity, SensorEntity):
 
     def __init__(self, coordinator: NetvizCoordinator) -> None:
         super().__init__(coordinator, "faceplate")
-        self._geometry = faceplate_geometry(coordinator.model)
+        geometry = None
+        if is_template(coordinator.model):
+            geometry = template_geometry(coordinator.model, coordinator.ports)
+        elif coordinator.model.get("ports"):
+            geometry = faceplate_geometry(coordinator.model)
+        if geometry is not None:
+            self._geometry = with_radios(geometry, coordinator.wireless.get("radios", {}))
+        else:
+            # No model file: lay the discovered ports out so the card has
+            # something to draw. It is a drawing of a port list rather than of
+            # a chassis, and it says so through the `generated` flag.
+            self._geometry = with_radios(
+                generated_geometry(
+                    coordinator.ports, coordinator.config_entry.title
+                ),
+                coordinator.wireless.get("radios", {}),
+            )
 
     @property
     def native_value(self) -> str:

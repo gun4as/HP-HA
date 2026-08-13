@@ -7,6 +7,9 @@ from typing import Final
 DOMAIN: Final = "netviz"
 
 CONF_MODEL: Final = "model"
+# Chosen in place of a model file: ports come from the device itself, by ifType.
+# A model file adds faceplate geometry and nothing else, so it stays optional.
+MODEL_AUTO: Final = "auto"
 CONF_VERSION: Final = "snmp_version"
 CONF_PROTOCOL: Final = "protocol"
 CONF_COMMUNITY: Final = "community"

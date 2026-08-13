@@ -1,14 +1,14 @@
 {
   "domain": "netviz",
   "name": "netviz",
-  "version": "0.3.1",
   "codeowners": ["@gun4as"],
   "config_flow": true,
   "dependencies": ["http", "frontend"],
   "documentation": "https://github.com/gun4as/HP-HA",
-  "issue_tracker": "https://github.com/gun4as/HP-HA/issues",
   "integration_type": "device",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/gun4as/HP-HA/issues",
   "loggers": ["pyasn1", "pysnmp"],
-  "requirements": ["pysnmp==7.1.27"]
+  "requirements": ["pysnmp==7.1.27"],
+  "version": "0.4.0"
 }

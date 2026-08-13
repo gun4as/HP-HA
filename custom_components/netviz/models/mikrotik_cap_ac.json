@@ -1,0 +1,29 @@
+{
+  "model": "RBcAPGi-5acD2nD",
+  "vendor": "MikroTik",
+  "display": "MikroTik cAP ac",
+  "match": "order",
+  "faceplate": {
+    "width": 100,
+    "height": 70,
+    "viewbox": "0 0 100 70"
+  },
+  "ports": [
+    {
+      "index": 0,
+      "kind": "rj45",
+      "x": 26,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    },
+    {
+      "index": 1,
+      "kind": "rj45",
+      "x": 52,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    }
+  ]
+}

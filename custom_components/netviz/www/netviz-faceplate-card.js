@@ -26,6 +26,18 @@ const LABEL_FONT_SIZE = 8;
 // colours and the tooltip. The switch's own web UI does the same when small.
 const LABEL_MIN_PX = 5.5;
 
+// A radio is drawn like a socket but coloured by what it is doing: serving
+// clients, up and idle, or not running at all.
+const RADIO_BUSY = "#3ec46d";
+const RADIO_IDLE = "#2e7d4f";
+const RADIO_DOWN = "var(--disabled-color, #6f7378)";
+// A controller manages this radio: it is transmitting, but the device cannot say
+// how many clients are on it. Idle green would be a lie, grey doubly so.
+const RADIO_MANAGED = "#2e6ea3";
+// No entity behind the block at all. Drawn hollow, because grey is what a radio
+// that is switched off looks like, and "I was not told" is a different thing.
+const RADIO_NO_ENTITY = "var(--card-background-color, #1c1c1c)";
+
 const LINK_COLORS = {
   down: "var(--disabled-color, #6f7378)",
   10: "#f2b632",
@@ -100,11 +112,18 @@ class NetvizFaceplateCard extends HTMLElement {
    */
   _entityMap() {
     const hass = this._hass;
-    const expected = Object.keys(this._portNodes || {}).length;
+    // The specific nodes this faceplate draws, not how many keys came back. A
+    // count cannot tell a complete map from one that is missing a radio and has
+    // picked up the device-wide `system` key instead - it caches the gap and
+    // never looks again.
+    const wanted = [
+      ...Object.keys(this._portNodes || {}),
+      ...Object.keys(this._radioNodes || {}),
+    ];
     if (
       this._map &&
       this._mapSource === hass.entities &&
-      Object.keys(this._map).length >= expected
+      wanted.every((key) => this._map[key])
     ) {
       return this._map;
     }
@@ -121,9 +140,11 @@ class NetvizFaceplateCard extends HTMLElement {
       if (!map[port]) map[port] = {};
       map[port][metric] = entry.entity_id;
     }
-    // Never cache an empty or partial map: at startup some states may not have
-    // arrived yet, and then their attributes cannot be read.
-    if (Object.keys(map).length >= expected && expected > 0) {
+    // Never cache a partial map: at startup some states may not have arrived
+    // yet, and a node whose entity is disabled may be enabled later. Rescanning
+    // costs one pass over the registry per state change and is the cheaper
+    // mistake - caching a gap makes the card wrong until it is rebuilt.
+    if (wanted.length && wanted.every((key) => map[key])) {
       this._mapSource = hass.entities;
       this._map = map;
     }
@@ -168,9 +189,13 @@ class NetvizFaceplateCard extends HTMLElement {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", geometry.viewbox || `0 0 ${width} ${height}`);
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    // Scale down to fit, but never blow a small faceplate up to fill the card:
+    // an 11 port device is a quarter the width of a 52 port one, and stretched
+    // to the same width its ports come out four times life size.
+    const maxWidth = Math.round(width * 1.4);
     svg.style.cssText =
-      "width:100%;height:auto;display:block" +
-      (minWidth ? `;min-width:${minWidth}px` : "");
+      "width:100%;height:auto;display:block;margin:0 auto" +
+      (minWidth ? `;min-width:${minWidth}px` : `;max-width:${maxWidth}px`);
     this._viewBoxWidth = width;
     this._labels = [];
 
@@ -232,6 +257,39 @@ class NetvizFaceplateCard extends HTMLElement {
       this._portNodes[port.id] = { body, poeDot, tooltip, def: port };
     }
 
+    this._radioNodes = {};
+    for (const radio of geometry.radios || []) {
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.style.cursor = "pointer";
+
+      const body = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      body.setAttribute("x", radio.x);
+      body.setAttribute("y", radio.y);
+      body.setAttribute("width", radio.w);
+      body.setAttribute("height", radio.h);
+      body.setAttribute("rx", "9");
+      body.setAttribute("stroke", "var(--divider-color, #555)");
+      body.setAttribute("stroke-width", "1");
+      group.appendChild(body);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", Number(radio.x) + Number(radio.w) / 2);
+      label.setAttribute("y", Number(radio.y) + Number(radio.h) / 2 + 3);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", String(LABEL_FONT_SIZE));
+      label.setAttribute("fill", "var(--primary-text-color, #eee)");
+      label.setAttribute("pointer-events", "none");
+      label.textContent = radio.label;
+      group.appendChild(label);
+      this._labels.push(label);
+
+      const tooltip = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      group.appendChild(tooltip);
+      group.addEventListener("click", () => this._openPort(radio.id));
+      svg.appendChild(group);
+      this._radioNodes[radio.id] = { body, tooltip, def: radio };
+    }
+
     wrap.appendChild(svg);
 
     const legend = document.createElement("div");
@@ -254,7 +312,18 @@ class NetvizFaceplateCard extends HTMLElement {
       `<span style="display:inline-flex;align-items:center;gap:5px">
          <span style="width:9px;height:9px;border-radius:50%;background:${POE_COLOR};
                       box-shadow:0 0 0 1px ${POE_OUTLINE}"></span>PoE
-       </span>`;
+       </span>` +
+      ((geometry.radios || []).length
+        ? `<span style="display:inline-flex;align-items:center;gap:5px">
+             <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_BUSY}"></span>radio
+           </span>
+           <span style="display:inline-flex;align-items:center;gap:5px">
+             <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_IDLE}"></span>idle
+           </span>
+           <span style="display:inline-flex;align-items:center;gap:5px">
+             <span style="width:14px;height:9px;border-radius:5px;background:${RADIO_MANAGED}"></span>managed
+           </span>`
+        : "");
     wrap.appendChild(legend);
 
     this._summary = document.createElement("div");
@@ -356,7 +425,8 @@ class NetvizFaceplateCard extends HTMLElement {
         if (!Number.isNaN(poe)) poeTotal += poe;
       }
 
-      const lines = [`Port ${node.def.label}`];
+      // def.name is the full interface name when the label had to be shortened
+      const lines = [`Port ${node.def.name || node.def.label}`];
       if (link && link.attributes.description) {
         lines.push(link.attributes.description);
       }
@@ -374,15 +444,95 @@ class NetvizFaceplateCard extends HTMLElement {
       node.tooltip.textContent = lines.join(" · ");
     }
 
+    // null, not 0: "no radio gave a number" and "every radio reported nobody"
+    // read the same once summed, and only one of them is a measurement.
+    let radioClients = null;
+    let managedRadio = false;
+    let missingRadio = false;
+    for (const [radioId, node] of Object.entries(this._radioNodes || {})) {
+      const state = (states[radioId] || {}).radio;
+      const attrs = (state && state.attributes) || {};
+      const clients = state ? Number(state.state) : NaN;
+      const up = attrs.up !== false;
+
+      let colour = RADIO_DOWN;
+      if (!state) colour = RADIO_NO_ENTITY;
+      else if (up) {
+        if (attrs.managed) colour = RADIO_MANAGED;
+        else colour = clients > 0 ? RADIO_BUSY : RADIO_IDLE;
+      }
+      node.body.setAttribute("fill", colour);
+      // A hollow block is a block with nothing behind it, and the dashes say so
+      // even to somebody who cannot tell the two greys apart.
+      node.body.setAttribute("stroke-dasharray", state ? "" : "3 2");
+      if (!state) missingRadio = true;
+      if (Number.isFinite(clients)) radioClients = (radioClients || 0) + clients;
+      if (attrs.managed) managedRadio = true;
+
+      const lines = [attrs.interface || node.def.label];
+      if (!state) {
+        lines.push(
+          "no entity for this radio - enable it on the device page, " +
+          "or reload the integration if it appeared after setup"
+        );
+        node.tooltip.textContent = lines.join(" · ");
+        continue;
+      }
+      if (attrs.ssid) lines.push(attrs.ssid);
+      lines.push(up ? "up" : "down");
+      // Why two identical access points can be labelled differently: the band
+      // comes from the frequency, and a device with no local AP configuration
+      // reports none. Naming the band from the interface would be a guess.
+      if (!attrs.band) lines.push("band unknown - the device reports no frequency");
+      if (attrs.managed) {
+        lines.push(
+          "managed by a controller - SSID and clients are on it; the band is " +
+          "this radio's own report"
+        );
+      } else if (Number.isFinite(clients)) {
+        lines.push(`${clients} client${clients === 1 ? "" : "s"}`);
+      }
+      if (attrs.signal_avg != null) lines.push(`avg ${attrs.signal_avg} dBm`);
+      if (attrs.noise_floor != null) lines.push(`noise ${attrs.noise_floor} dBm`);
+      if (attrs.quality != null) lines.push(`CCQ ${attrs.quality}%`);
+      node.tooltip.textContent = lines.join(" · ");
+    }
+
     const total = Object.keys(this._portNodes).length;
     this._summary.textContent =
       `${up}/${total} up` +
-      (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "");
+      (poeTotal > 0 ? ` · PoE ${poeTotal.toFixed(1)} W` : "") +
+      this._wirelessSummary(radioClients, managedRadio, missingRadio);
+  }
+
+  /**
+   * The wireless part of the summary line.
+   *
+   * A device's own total beats adding up the blocks: on a controller the blocks
+   * are its provisioned radios, which report nothing, while the clients are on
+   * interfaces belonging to the access points it manages. Where neither number
+   * exists the clause is left out rather than printed as a zero.
+   */
+  _wirelessSummary(fromBlocks, managed, missing) {
+    if (!Object.keys(this._radioNodes || {}).length) return "";
+    const total = (this._portStates().system || {}).wireless_clients;
+    const count = total ? Number(total.state) : fromBlocks;
+    if (count === null || !Number.isFinite(count)) {
+      if (missing) return " · wireless: no entity";
+      return managed ? " · wireless counted on the controller" : " · wireless unknown";
+    }
+    return ` · ${count} wireless` + (missing ? " (some radios have no entity)" : "");
   }
 
   /** Clicking a port opens the more-info dialog of its link entity. */
   _openPort(portId) {
     const states = this._portStates()[portId];
+    if (states && states.radio) {
+      const event = new Event("hass-more-info", { bubbles: true, composed: true });
+      event.detail = { entityId: states.radio.entity_id };
+      this.dispatchEvent(event);
+      return;
+    }
     if (!states) return;
     const target = states.link || Object.values(states)[0];
     if (!target) return;
@@ -409,4 +559,4 @@ window.customCards.push({
   preview: false,
 });
 
-console.info("%c netviz-faceplate-card %c 0.3.0 ", "background:#2ea3f2;color:#fff", "");
+console.info("%c netviz-faceplate-card %c 0.4.7 ", "background:#2ea3f2;color:#fff", "");

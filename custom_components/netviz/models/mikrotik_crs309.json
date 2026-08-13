@@ -1,0 +1,85 @@
+{
+  "model": "CRS309-1G-8S+",
+  "vendor": "MikroTik",
+  "display": "MikroTik CRS309-1G-8S+",
+  "match": "order",
+  "faceplate": {
+    "width": 356,
+    "height": 70,
+    "viewbox": "0 0 356 70"
+  },
+  "ports": [
+    {
+      "index": 0,
+      "kind": "sfp+",
+      "x": 26,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 1,
+      "kind": "sfp+",
+      "x": 60,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 2,
+      "kind": "sfp+",
+      "x": 94,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 3,
+      "kind": "sfp+",
+      "x": 128,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 4,
+      "kind": "sfp+",
+      "x": 162,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 5,
+      "kind": "sfp+",
+      "x": 196,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 6,
+      "kind": "sfp+",
+      "x": 230,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 7,
+      "kind": "sfp+",
+      "x": 264,
+      "y": 26,
+      "w": 30,
+      "h": 18
+    },
+    {
+      "index": 8,
+      "kind": "rj45",
+      "x": 308,
+      "y": 26,
+      "w": 22,
+      "h": 18
+    }
+  ]
+}

@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_VLANS, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .model import is_template
 from .snmp import SnmpClient, SnmpConnectionError
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
         hass: HomeAssistant,
         entry: ConfigEntry,
         client: SnmpClient,
-        model: dict,
+        model: dict | None,
         scan_interval: int = DEFAULT_SCAN_INTERVAL,
     ) -> None:
         super().__init__(
@@ -36,12 +37,23 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
             config_entry=entry,
         )
         self.client = client
-        self.model = model
-        self.ports = model["ports"]
+        self.model = model or {}
+        # Without a model file the ports are unknown until the device is asked.
+        # The first refresh happens before the platforms load, so by the time
+        # entities are created this list is populated either way.
+        # A template describes geometry only, so its slots are not ports and the
+        # device has to be asked either way.
+        self.ports: list[dict] = (
+            [] if (not model or is_template(model)) else list(model["ports"])
+        )
         self._with_vlans = entry.options.get(CONF_VLANS, True)
 
     async def _async_update_data(self) -> dict:
         try:
+            if not self.ports:
+                self.ports = await self.client.discover_ports()
+                if not self.ports:
+                    raise UpdateFailed("no physical ports found on the device")
             return await self.client.poll(self.ports, with_vlans=self._with_vlans)
         except SnmpConnectionError as err:
             raise UpdateFailed(f"SNMP: {err}") from err
@@ -58,3 +70,10 @@ class NetvizCoordinator(DataUpdateCoordinator[dict]):
         if not self.data:
             return {}
         return self.data.get("system", {})
+
+    @property
+    def wireless(self) -> dict:
+        """Aggregated wireless clients, empty on anything that is not a controller."""
+        if not self.data:
+            return {}
+        return self.data.get("wireless", {})

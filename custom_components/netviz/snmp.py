@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 
 from pysnmp.hlapi.v3arch.asyncio import (
@@ -32,6 +33,11 @@ from pysnmp.hlapi.v3arch.asyncio import (
     usmHMACMD5AuthProtocol,
     usmHMACSHAAuthProtocol,
 )
+
+try:  # inside Home Assistant this is a package
+    from . import profiles
+except ImportError:  # ...and standalone it is a plain directory on sys.path
+    import profiles
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,14 +79,24 @@ OID_DOT1Q_PVID = "1.3.6.1.2.1.17.7.1.4.5.1.1"
 OID_VLAN_EGRESS = "1.3.6.1.2.1.17.7.1.4.3.1.2"
 OID_VLAN_UNTAGGED = "1.3.6.1.2.1.17.7.1.4.3.1.4"
 
+OID_IF_TYPE = "1.3.6.1.2.1.2.2.1.3"
+OID_IF_PHYS_ADDR = "1.3.6.1.2.1.2.2.1.6"
+
 # --- system ---
 OID_SYS_DESCR = "1.3.6.1.2.1.1.1.0"
+OID_SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
 OID_SYS_UPTIME = "1.3.6.1.2.1.1.3.0"
 OID_SYS_NAME = "1.3.6.1.2.1.1.5.0"
 # ENTITY-MIB entPhysicalSerialNum. The table, not `.1`: on AOS-S the chassis is
 # index 1001, and the table also holds module and power supply rows, some of
 # which are empty or contain a vendor placeholder.
 OID_ENT_SERIAL_TABLE = "1.3.6.1.2.1.47.1.1.1.1.11"
+# ...and the class column, which is what makes the serial trustworthy. Picking
+# the lowest index instead works on AOS-S and fails on RouterOS, where an
+# unknown-class row answers "rb400_usb" - a component name that is identical on
+# every unit of that model, so two devices would collide on one unique_id.
+OID_ENT_CLASS = "1.3.6.1.2.1.47.1.1.1.1.5"
+ENT_CLASS_CHASSIS = 3
 # Values that are technically non-empty but are not a serial number
 SERIAL_PLACEHOLDERS = {"not avail", "not available", "none", "n/a", "unknown", "0"}
 OID_CPU = "1.3.6.1.4.1.11.2.14.11.5.1.9.6.1.0"
@@ -139,6 +155,29 @@ def _auth_data(creds: SnmpCredentials):
     return CommunityData(creds.community, mpModel=1)
 
 
+# AOS-S sysDescr:
+#   Aruba JL357A 2540-48G-PoE+-4SFP+ Switch, revision YC.16.11.0029, ROM ... (...)
+# The `revision` field is the one we want. `split(",")[-1]` would pick up the ROM
+# version together with the build path, truncated mid-word. This lives here
+# rather than next to the entity because it is a pure sysDescr parser, and this
+# module is the one that can be imported and tested without Home Assistant.
+_RE_REVISION = re.compile(r"revision\s+([A-Za-z0-9._-]+)", re.IGNORECASE)
+_RE_VERSIONISH = re.compile(r"\b([A-Za-z]{0,3}\.?\d+\.\d+[.\d]*)\b")
+
+
+def sw_version_from_descr(descr: str | None) -> str | None:
+    """Firmware version from sysDescr, or None if the format is unrecognised."""
+    if not descr:
+        return None
+    if match := _RE_REVISION.search(descr):
+        return match.group(1).rstrip(".,")
+    # Different vendor or different format: take the first thing that looks like
+    # a version. None beats putting a model name or a file path on the device page.
+    if match := _RE_VERSIONISH.search(descr):
+        return match.group(1)
+    return None
+
+
 def _numeric(oid) -> str:
     return ".".join(str(part) for part in oid.get_oid())
 
@@ -148,6 +187,55 @@ def _as_int(value, default: int | None = None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _burned_in(raw) -> bool | None:
+    """Whether a MAC address was set in hardware rather than by software.
+
+    Bit 1 of the first octet is IEEE's locally-administered flag: clear on an
+    address burned into a NIC, set on one a driver invented. RouterOS follows it,
+    so a radio interface a controller created reads 0x4a where the physical one
+    it hangs off reads 0x48 - which is how a provisioned access point can be
+    asked which of its six radios are real. None when the address is missing.
+    """
+    if raw is None:
+        return None
+    # An address arrives as six raw octets, not as text: str() on a pysnmp
+    # OctetString hands back the bytes decoded as characters, and 0x48 comes out
+    # as "H". Only the first octet matters, and only one bit of it.
+    if isinstance(raw, (bytes, bytearray)):
+        return not raw[0] & 0x02 if raw else None
+    digits = re.sub(r"[^0-9a-fA-F]", "", str(raw).removeprefix("0x").strip())
+    if len(digits) < 2:
+        return None
+    return not int(digits[:2], 16) & 0x02
+
+
+# RouterOS states a channel as frequency/width-extensions/protocol(power), e.g.
+# "2437/20-Ce/gn(20dBm)". Only the leading frequency is wanted; the rest is kept
+# verbatim as an attribute rather than picked apart into claims.
+_RE_CHANNEL_FREQ = re.compile(r"^\s*(\d{3,5})")
+
+
+def _channel_frequency(raw) -> int | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    match = _RE_CHANNEL_FREQ.match(text)
+    return int(match.group(1)) if match else None
+
+
+def _band_of(frequency: int | None) -> str | None:
+    """A short band label from a channel frequency in MHz."""
+    if frequency is None:
+        return None
+    if 2000 <= frequency < 3000:
+        return "2.4G"
+    if 4900 <= frequency < 5900:
+        return "5G"
+    if 5900 <= frequency < 7200:
+        return "6G"
+    return None
 
 
 def _portlist(raw: bytes) -> set[int]:
@@ -163,7 +251,9 @@ def _portlist(raw: bytes) -> set[int]:
 class SnmpClient:
     """One agent. Lives as long as the config entry."""
 
-    def __init__(self, creds: SnmpCredentials) -> None:
+    def __init__(
+        self, creds: SnmpCredentials, profile: profiles.Profile | None = None
+    ) -> None:
         self._creds = creds
         self._engine = SnmpEngine()
         self._auth = _auth_data(creds)
@@ -172,6 +262,9 @@ class SnmpClient:
         self._prev: _Snapshot | None = None
         self._vlan_cache: tuple[float, dict[int, dict]] | None = None
         self._unmatched: frozenset[str] | None = None
+        # Until sysObjectID has been read, assume nothing beyond standard MIBs.
+        self.profile = profile or profiles.GENERIC
+        self._detected = profile is not None
 
     async def _target(self) -> UdpTransportTarget:
         if self._transport is None:
@@ -250,37 +343,147 @@ class SnmpClient:
 
     # ------------------------------------------------------------ higher level
 
-    async def _serial(self) -> str | None:
-        """Chassis serial number from entPhysicalSerialNum.
+    def _adopt(self, sys_object_id: object) -> None:
+        self.profile = profiles.detect(sys_object_id)
+        self._detected = True
+        _LOGGER.debug(
+            "%s: sysObjectID %s -> profile %s",
+            self._creds.host,
+            sys_object_id,
+            self.profile.key,
+        )
 
-        Takes the first usable value in ascending index order, because in
-        ENTITY-MIB the chassis always precedes the modules plugged into it.
-        Skips empty values, vendor placeholders, and pads away the stray
-        whitespace that module serial numbers tend to carry.
+    async def _ensure_profile(self) -> None:
+        """Detect on first use.
+
+        The coordinator calls poll() straight after a restart without any probe,
+        so waiting for probe() would leave every device on the generic profile -
+        no PoE, no CPU - until something happened to call it.
         """
+        if self._detected:
+            return
         try:
-            table = await self.walk(OID_ENT_SERIAL_TABLE)
+            data = await self.get_many([OID_SYS_OBJECT_ID])
+        except SnmpConnectionError:
+            return
+        self._adopt(data.get(OID_SYS_OBJECT_ID))
+
+    def _usable_serial(self, value: object) -> str | None:
+        text = str(value or "").strip()
+        if not text or text.lower() in self.profile.serial.placeholders:
+            return None
+        return text
+
+    async def _serial(self) -> str | None:
+        """A stable per-device identifier, from wherever the profile says.
+
+        Either the ENTITY-MIB row the device itself calls a chassis, or a vendor
+        scalar. If nothing usable comes back the answer is None, which is honest
+        - better than a string like `rb400_usb` that is identical on every unit
+        of a model and would collide two devices onto one unique_id.
+        """
+        source = self.profile.serial
+        if source.scalar_oid:
+            try:
+                data = await self.get_many([source.scalar_oid])
+            except SnmpConnectionError:
+                _LOGGER.debug("%s is not available", source.scalar_oid, exc_info=True)
+                return None
+            return self._usable_serial(data.get(source.scalar_oid))
+
+        if not source.entity_chassis:
+            return None
+        try:
+            serials = await self.walk(OID_ENT_SERIAL_TABLE)
         except SnmpConnectionError:
             _LOGGER.debug("entPhysicalSerialNum is not available", exc_info=True)
             return None
-        for index in sorted(table, key=lambda k: [int(p) for p in k.split(".")]):
-            value = str(table[index]).strip()
-            if value and value.lower() not in SERIAL_PLACEHOLDERS:
-                return value
+        if not serials:
+            return None
+        try:
+            classes = await self.walk(OID_ENT_CLASS)
+        except SnmpConnectionError:
+            classes = {}
+
+        if classes:
+            candidates = [
+                index for index, value in classes.items()
+                if _as_int(value) == ENT_CLASS_CHASSIS
+            ]
+        else:
+            # No class column at all: fall back to index order, where the
+            # chassis precedes the modules plugged into it.
+            candidates = list(serials)
+
+        for index in sorted(candidates, key=lambda k: [int(p) for p in k.split(".")]):
+            if usable := self._usable_serial(serials.get(index)):
+                return usable
         return None
 
     async def probe(self) -> dict[str, str | None]:
-        """For config flow validation. Raises SnmpConnectionError on silence."""
+        """For config flow validation. Raises SnmpConnectionError on silence.
+
+        Also settles which profile applies, so everything after this point knows
+        which private MIBs the device actually speaks.
+        """
         async with self._lock:
-            data = await self.get_many([OID_SYS_NAME, OID_SYS_DESCR])
+            data = await self.get_many(
+                [OID_SYS_NAME, OID_SYS_DESCR, OID_SYS_OBJECT_ID]
+            )
             if not data:
                 raise SnmpConnectionError("the agent did not respond")
+            self._adopt(data.get(OID_SYS_OBJECT_ID))
             serial = await self._serial()
         return {
             "name": str(data.get(OID_SYS_NAME, "")).strip() or None,
             "descr": str(data.get(OID_SYS_DESCR, "")).strip() or None,
             "serial": serial,
+            "profile": self.profile.key,
+            "profile_name": self.profile.name,
         }
+
+    async def discover_ports(self) -> list[dict]:
+        """Physical ports straight off the device, when no model file applies.
+
+        ifType 6 is ethernetCsmacd on every vendor, which is the only reliable
+        way to tell a port from a VLAN interface, a bridge or a radio. ifName is
+        not: on RouterOS it is whatever the administrator typed, so it serves as
+        the label and as the key, and renaming an interface does create new
+        entities - the same trade-off the model files already make.
+        """
+        # The coordinator calls this before poll(), which is where detection used
+        # to happen - so discovery ran on the generic profile, self.profile.poe
+        # was None, and not one port was ever marked as PoE. No PoE entities, no
+        # orange dots, on every device added by discovery.
+        await self._ensure_profile()
+        types = await self.walk(OID_IF_TYPE)
+        names = await self.walk(OID_IF_NAME)
+        poe_ports: set[str] = set()
+        if (poe := self.profile.poe) and poe.index == "ifindex":
+            poe_ports = {k.split(".")[0] for k in await self.walk(poe.power_oid)}
+
+        ports: list[dict] = []
+        for index in sorted(
+            (i for i, t in types.items() if _as_int(t) == profiles.IF_TYPE_ETHERNET),
+            key=lambda k: int(k),
+        ):
+            name = str(names.get(index, "")).strip() or f"if{index}"
+            ports.append({
+                "id": name,
+                "label": name,
+                "kind": "rj45",
+                "ifname": name,
+                "ifindex": int(index),
+                "poe": index in poe_ports,
+                "poe_index": index,
+            })
+        _LOGGER.debug(
+            "%s: discovered %d physical ports, %d with PoE",
+            self._creds.host,
+            len(ports),
+            sum(1 for p in ports if p["poe"]),
+        )
+        return ports
 
     async def _vlans(self, ttl: float = 300.0) -> dict[int, dict]:
         loop = asyncio.get_running_loop()
@@ -294,8 +497,13 @@ class SnmpClient:
             for bp, v in base_map_raw.items()
             if _as_int(bp) is not None and _as_int(v) is not None
         }
-        egress = await self.walk(OID_VLAN_EGRESS, raw_bytes=True)
-        untagged = await self.walk(OID_VLAN_UNTAGGED, raw_bytes=True)
+        # RouterOS leaves the static VLAN tables empty while filling dot1qPvid,
+        # so on such a profile there is no point asking for them at all.
+        if self.profile.vlan_egress:
+            egress = await self.walk(OID_VLAN_EGRESS, raw_bytes=True)
+            untagged = await self.walk(OID_VLAN_UNTAGGED, raw_bytes=True)
+        else:
+            egress, untagged = {}, {}
         pvid = await self.walk(OID_DOT1Q_PVID)
 
         result: dict[int, dict] = {}
@@ -326,9 +534,353 @@ class SnmpClient:
         self._vlan_cache = (now, result)
         return result
 
+    async def _wireless(
+        self, names: dict, oper: dict | None = None, admin: dict | None = None
+    ) -> dict:
+        """Wireless clients, aggregated.
+
+        Read from a CAPsMAN controller, this covers every access point it
+        manages - a managed AP answers almost nothing about its own radios, so
+        asking the controller is both the only way and the cheaper one.
+
+        Aggregates only. The registration table is keyed by client MAC address,
+        and turning those into entities would be device tracking of everyone in
+        the building; Home Assistant has an integration for that already, and
+        this is not it.
+        """
+        source = self.profile.wireless
+        if source is None:
+            return {}
+        admin = admin or {}
+        registrations = await self.walk(source.registration_ssid_oid)
+        # mtxrWlAp says which radios this device serves itself, and for a local
+        # client the SSID has to come from there - the local registration table
+        # has no SSID column of its own.
+        local = await self._local_ap_info()
+        local_signals = (
+            await self.walk(source.local_signal_oid) if source.local_signal_oid else {}
+        )
+        physical, virtual = await self._radio_interfaces(oper or {})
+        if not registrations and not local and not local_signals and not physical:
+            return {}
+        signals = await self.walk(source.registration_signal_oid)
+
+        by_ssid: dict[str, dict] = {}
+        by_radio: dict[str, dict] = {}
+        ssid_per_radio: dict[str, set[str]] = {}
+        for index, raw_ssid in registrations.items():
+            ssid = str(raw_ssid).strip() or "(hidden)"
+            # index is the client MAC followed by the interface it is on
+            ifindex = index.split(".")[-1]
+            ssid_per_radio.setdefault(ifindex, set()).add(ssid)
+            signal = _as_int(signals.get(index))
+            for bucket in (
+                by_ssid.setdefault(ssid, {"clients": 0, "_signals": []}),
+                by_radio.setdefault(
+                    ifindex,
+                    {
+                        "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                        "clients": 0,
+                        "_signals": [],
+                    },
+                ),
+            ):
+                bucket["clients"] += 1
+                if signal is not None:
+                    bucket["_signals"].append(signal)
+
+        # Clients on a radio this device serves itself. Same shape, except the
+        # SSID is looked up per interface rather than carried per client.
+        for index, raw_signal in local_signals.items():
+            ifindex = index.split(".")[-1]
+            ssid = (local.get(ifindex) or {}).get("ssid") or "(unknown)"
+            signal = _as_int(raw_signal)
+            for bucket in (
+                by_ssid.setdefault(ssid, {"clients": 0, "_signals": []}),
+                by_radio.setdefault(
+                    ifindex,
+                    {
+                        "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                        "clients": 0,
+                        "_signals": [],
+                    },
+                ),
+            ):
+                bucket["clients"] += 1
+                if signal is not None:
+                    bucket["_signals"].append(signal)
+
+        # Every interface the controller has provisioned, whether or not anybody
+        # is on it. Counting registrations can only find a network in use, so a
+        # configured SSID sitting empty was missing from the list altogether -
+        # three networks per band on each access point, and only the busy ones
+        # showed. This table is indexed by ifIndex, so the names line up.
+        for ifindex, row in (await self._cm_interfaces()).items():
+            bucket = by_radio.setdefault(
+                ifindex,
+                {
+                    "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                    "clients": 0,
+                    "_signals": [],
+                },
+            )
+            # Registrations are per-client and carry signal, so they win where
+            # they exist; this is the floor that makes an empty network visible.
+            if not bucket.get("clients"):
+                bucket["clients"] = row["clients"]
+            for key in ("channel", "frequency", "band"):
+                if key in row:
+                    bucket[key] = row[key]
+
+        # The SSID a CAPsMAN interface is carrying, taken from the clients on it.
+        # Every interface observed served exactly one, but that is a property of
+        # this network rather than a guarantee, so a mixed one is left unnamed
+        # instead of being represented by whichever name won.
+        for ifindex, names_seen in ssid_per_radio.items():
+            if len(names_seen) == 1 and (bucket := by_radio.get(ifindex)):
+                bucket["ssid"] = next(iter(names_seen))
+
+        for bucket in (*by_ssid.values(), *by_radio.values()):
+            found = bucket.pop("_signals")
+            bucket["signal_avg"] = round(sum(found) / len(found)) if found else None
+            bucket["signal_min"] = min(found) if found else None
+            bucket["signal_max"] = max(found) if found else None
+
+        # An interface a controller created is the sign that this device's own
+        # mtxrWlAp rows describe a local configuration nobody is being served by:
+        # factory SSID, zero clients, while the clients are counted on the
+        # controller. Where a MAC address is unavailable, fall back to counting -
+        # more radios up than rows in mtxrWlAp means the same thing, just less
+        # directly, and a device that answers neither is left alone.
+        if physical or virtual:
+            managed = bool(virtual)
+        else:
+            managed = bool(local) and len(await self._radios_up(oper)) > len(local)
+        self._merge_local_radios(names, by_radio, local, oper, managed, admin)
+
+        # A fully provisioned access point has no mtxrWlAp row at all, so nothing
+        # above put its radios anywhere. They are transmitting and worth drawing;
+        # only the client count is somebody else's to report. Without a frequency
+        # there is no band either, so these carry the interface name instead.
+        for ifindex, name in physical.items():
+            radio = by_radio.setdefault(
+                ifindex,
+                {
+                    "name": name,
+                    "clients": None if managed else 0,
+                    "signal_avg": None,
+                    "signal_min": None,
+                    "signal_max": None,
+                },
+            )
+            radio.setdefault("up", True)
+            radio.setdefault("managed", managed)
+            radio["local"] = True
+
+        return {
+            # Counted from registrations, never from a radio's own tally, so a
+            # managed AP reporting nothing does not inflate or zero the total.
+            "clients": len(registrations) + len(local_signals),
+            "ssids": dict(sorted(by_ssid.items())),
+            "radios": dict(
+                sorted(by_radio.items(), key=lambda kv: kv[1]["name"])
+            ),
+        }
+
+    async def _local_ap_info(self) -> dict[str, dict]:
+        """What each radio this device serves itself reports about itself.
+
+        mtxrWlAp is populated for a radio configured in AP mode, whether or not
+        it is currently up; a radio in station mode has no row at all. A CAPsMAN
+        controller usually serves a couple of radios itself alongside the ones it
+        manages, and those appear here too.
+        """
+        source = self.profile.wireless
+        if source is None or not source.ap_ssid_oid:
+            return {}
+        ssids = await self.walk(source.ap_ssid_oid)
+        if not ssids:
+            return {}
+        clients = await self.walk(source.ap_clients_oid) if source.ap_clients_oid else {}
+        noise = await self.walk(source.ap_noise_oid) if source.ap_noise_oid else {}
+        quality = await self.walk(source.ap_ccq_oid) if source.ap_ccq_oid else {}
+        freq = await self.walk(source.ap_freq_oid) if source.ap_freq_oid else {}
+        return {
+            index.split(".")[0]: {
+                "ssid": str(raw).strip() or None,
+                "clients": _as_int(clients.get(index), 0) or 0,
+                "noise_floor": _as_int(noise.get(index)),
+                "quality": _as_int(quality.get(index)),
+                "frequency": _as_int(freq.get(index)),
+                "band": _band_of(_as_int(freq.get(index))),
+            }
+            for index, raw in ssids.items()
+        }
+
+    async def _cm_interfaces(self) -> dict[str, dict]:
+        """What the controller says about each interface it has provisioned.
+
+        Only rows in an AP state are returned: the table also carries interfaces
+        that exist but are not serving, and a count against one of those would be
+        a number about nothing. Empty on any device that is not a controller.
+
+        The channel is populated on the master interface of a radio and empty on
+        the virtual APs hanging off it. Those virtual APs are on the same radio and
+        therefore the same channel, but the only thing linking them to their master
+        is the operator-chosen name - ifStackTable is empty on RouterOS - so the
+        frequency is left where the device reports it rather than copied along a
+        naming convention.
+        """
+        source = self.profile.wireless
+        if source is None or not source.cm_clients_oid:
+            return {}
+        counts = await self.walk(source.cm_clients_oid)
+        if not counts:
+            return {}
+        states = await self.walk(source.cm_state_oid) if source.cm_state_oid else {}
+        channels = (
+            await self.walk(source.cm_channel_oid) if source.cm_channel_oid else {}
+        )
+        out: dict[str, dict] = {}
+        for index, raw in counts.items():
+            ifindex = index.split(".")[0]
+            state = str(states.get(index, "")).strip()
+            if states and not state.startswith("running"):
+                continue
+            if (count := _as_int(raw)) is None:
+                continue
+            row: dict = {"clients": count}
+            if channel := str(channels.get(index, "")).strip():
+                row["channel"] = channel
+                if (freq := _channel_frequency(channel)) is not None:
+                    row["frequency"] = freq
+                    row["band"] = _band_of(freq)
+            out[ifindex] = row
+        return out
+
+    async def _radios_up(self, oper: dict) -> dict[str, str]:
+        """ifIndex to name for every radio interface that is running."""
+        types = await self.walk(OID_IF_TYPE)
+        names = await self.walk(OID_IF_NAME)
+        return {
+            index: str(names.get(index, "")).strip() or f"if{index}"
+            for index, kind in types.items()
+            if _as_int(kind) == profiles.IF_TYPE_WIFI
+            and _as_int(oper.get(index)) == 1
+        }
+
+    async def _radio_interfaces(self, oper: dict) -> tuple[dict, dict]:
+        """Running radios split into the device's own and a controller's.
+
+        Both dictionaries are empty when the device does not report interface
+        MAC addresses; the caller then has nothing to split on and says so
+        rather than guessing which of six radios are real.
+        """
+        up = await self._radios_up(oper)
+        if not up:
+            return {}, {}
+        macs = await self.walk(OID_IF_PHYS_ADDR, raw_bytes=True)
+        physical, virtual = {}, {}
+        for index, name in up.items():
+            match _burned_in(macs.get(index)):
+                case True:
+                    physical[index] = name
+                case False:
+                    virtual[index] = name
+        return physical, virtual
+
+    def _merge_local_radios(
+        self,
+        names: dict,
+        by_radio: dict,
+        local: dict[str, dict],
+        oper: dict | None = None,
+        managed: bool = False,
+        admin: dict | None = None,
+    ) -> None:
+        """Attach what a locally served radio says about itself."""
+        oper = oper or {}
+        admin = admin or {}
+        for ifindex, info in local.items():
+            radio = by_radio.setdefault(
+                ifindex,
+                {
+                    "name": str(names.get(ifindex, "")).strip() or f"if{ifindex}",
+                    "clients": 0,
+                    "signal_avg": None,
+                    "signal_min": None,
+                    "signal_max": None,
+                },
+            )
+            # Where a controller drives the radio, this row is the local
+            # configuration and only some of its columns describe what is on air.
+            # The SSID demonstrably does not: it reads as the factory default on
+            # an access point serving several other names, so it is dropped
+            # rather than shown next to a radio that is not carrying it. The
+            # noise floor and CCQ are physical measurements of the radio and
+            # plausible on their face. The frequency is the radio's own, so the
+            # band is kept - though nothing here proves it follows the channel
+            # the controller assigned, and the card says as much.
+            if not managed:
+                radio["ssid"] = info["ssid"]
+            radio["noise_floor"] = info["noise_floor"]
+            radio["quality"] = info["quality"]
+            radio["frequency"] = info["frequency"]
+            radio["band"] = info["band"]
+            # RouterOS reports ifOperStatus down on a wireless interface in AP
+            # mode until a client associates. The radio is running: the same
+            # interface reports a noise floor around -104 dBm and 97% transmit
+            # quality at the same moment, which a radio that was off could not
+            # do. Calling that "down" put a working access point in the same
+            # colour as a disabled one. ifAdminStatus plus the existence of this
+            # row settles it - the row means AP mode, and a radio in station mode
+            # has none, so an unassociated station is still correctly not up.
+            # ifAdminStatus alone would do, since this row proves AP mode; the
+            # ifOperStatus arm is the fallback for a device that answers no
+            # admin table, and for a vendor that reports AP mode honestly.
+            radio["up"] = (
+                _as_int(admin.get(ifindex)) == 1 or _as_int(oper.get(ifindex)) == 1
+            )
+            radio["managed"] = managed
+            # This device owns the radio, as against the ones a controller
+            # reports on behalf of the access points it manages.
+            radio["local"] = True
+            # Counting registrations is exact and per-client; the radio's own
+            # tally is the fallback for when no registration table answered.
+            if not radio["clients"]:
+                if managed:
+                    # Its own tally counts clients on the local SSID, which is
+                    # not the one being served. Zero here would read as "nobody
+                    # is connected" on a radio carrying a dozen clients.
+                    radio["clients"] = None
+                else:
+                    radio["clients"] = info["clients"]
+
+    async def _storage(self, match: str) -> tuple[int | None, int | None]:
+        """Free and used bytes from an hrStorage row, matched by description.
+
+        Sizes are in allocation units, not bytes, and the unit is per row.
+        """
+        descrs = await self.walk(profiles.OID_HR_STORAGE_DESCR)
+        index = next(
+            (i for i, v in descrs.items() if str(v).strip().lower() == match), None
+        )
+        if index is None:
+            return None, None
+        sizes = await self.walk(profiles.OID_HR_STORAGE_SIZE)
+        used = await self.walk(profiles.OID_HR_STORAGE_USED)
+        units = await self.walk(profiles.OID_HR_STORAGE_UNITS)
+        unit = _as_int(units.get(index), 1) or 1
+        total = _as_int(sizes.get(index))
+        taken = _as_int(used.get(index))
+        if total is None or taken is None:
+            return None, None
+        return (total - taken) * unit, taken * unit
+
     async def poll(self, ports: list[dict], with_vlans: bool = True) -> dict:
-        """One full cycle. `ports` comes from the model JSON."""
+        """One full cycle. `ports` comes from the model JSON, or from discovery."""
         async with self._lock:
+            await self._ensure_profile()
             loop = asyncio.get_running_loop()
             names = await self.walk(OID_IF_NAME)
             if not any(str(v) for v in names.values()):
@@ -345,22 +897,53 @@ class SnmpClient:
             alias = await self.walk(OID_IF_ALIAS)
             hcin = await self.walk(OID_IF_HCIN)
             hcout = await self.walk(OID_IF_HCOUT)
-            detect = await self.walk(OID_PETH_DETECT)
-            poe_mw = await self.walk(OID_HP_POE_MW)
+            poe = self.profile.poe
+            poe_power = await self.walk(poe.power_oid) if poe else {}
+            poe_status = (
+                await self.walk(poe.status_oid) if poe and poe.status_oid else {}
+            )
             vlan_map = await self._vlans() if with_vlans else {}
 
-            system_raw = await self.get_many(
-                [
-                    OID_SYS_NAME,
-                    OID_SYS_DESCR,
-                    OID_SYS_UPTIME,
-                    OID_CPU,
-                    OID_MEM_FREE,
-                    OID_MEM_USED,
+            scalars = [OID_SYS_NAME, OID_SYS_DESCR, OID_SYS_UPTIME]
+            cpu_source = self.profile.cpu
+            if cpu_source and not cpu_source.table:
+                scalars.append(cpu_source.oid)
+            memory = self.profile.memory
+            if memory and memory.free_oid:
+                scalars += [memory.free_oid, memory.used_oid]
+            system_raw = await self.get_many(scalars)
+
+            cpu = _as_int(system_raw.get(cpu_source.oid)) if (
+                cpu_source and not cpu_source.table
+            ) else None
+            if cpu_source and cpu_source.table:
+                # RouterOS reports one row per core; a single number is what a
+                # sensor can show, so average them.
+                loads = [
+                    v for v in (_as_int(x) for x in (await self.walk(cpu_source.oid)).values())
+                    if v is not None
                 ]
+                cpu = round(sum(loads) / len(loads)) if loads else None
+
+            mem_free = mem_used = None
+            if memory and memory.free_oid:
+                mem_free = _as_int(system_raw.get(memory.free_oid))
+                mem_used = _as_int(system_raw.get(memory.used_oid))
+            elif memory and memory.storage_match:
+                mem_free, mem_used = await self._storage(memory.storage_match)
+
+            wireless = (
+                await self._wireless(names, oper, admin)
+                if self.profile.wireless
+                else {}
             )
-            main_power = await self.walk(OID_PETH_MAIN_POWER)
-            main_cons = await self.walk(OID_PETH_MAIN_CONS)
+
+            main_power = await self.walk(poe.main_power_oid) if (
+                poe and poe.main_power_oid
+            ) else {}
+            main_cons = await self.walk(poe.main_consumption_oid) if (
+                poe and poe.main_consumption_oid
+            ) else {}
 
             now = loop.time()
             snap = _Snapshot(ts=now)
@@ -407,24 +990,41 @@ class SnmpClient:
                     "tx_bps": tx_bps,
                 }
 
-                if pdef.get("poe"):
-                    pidx = str(pdef.get("poe_index", f"1.{pid}"))
-                    status = _as_int(detect.get(pidx))
-                    milliwatts = _as_int(poe_mw.get(pidx))
-                    port["poe_status"] = DETECT_STATUS.get(status, "unknown")
-                    port["poe_power"] = (
-                        round(milliwatts / 1000, 1) if milliwatts is not None else None
+                if poe and pdef.get("poe"):
+                    # AOS-S addresses the PoE tables by <group>.<port>, which the
+                    # model file carries; RouterOS addresses them by ifIndex.
+                    pidx = (
+                        str(ifindex) if poe.index == "ifindex"
+                        else str(pdef.get("poe_index", f"1.{pid}"))
                     )
+                    raw_power = _as_int(poe_power.get(pidx))
+                    status = poe.status_map.get(
+                        _as_int(poe_status.get(pidx)), "unknown"
+                    )
+                    port["poe_status"] = status
+                    # Passive PoE-out has no measurement hardware. An RB2011
+                    # reports `delivering` with voltage, current and power all
+                    # reading zero, and 0 W on a port that is powering something
+                    # is a false measurement dressed as a real one. Unknown is
+                    # the true answer.
+                    if raw_power is None or (raw_power == 0 and status == "delivering"):
+                        port["poe_power"] = None
+                    else:
+                        port["poe_power"] = round(raw_power / poe.power_divisor, 1)
 
                 vinfo = vlan_map.get(ifindex)
                 if vinfo:
-                    port["pvid"] = vinfo.get("pvid")
-                    port["vlans"] = vinfo.get("vlans", [])
-                    tagged = [
-                        v for v in vinfo.get("vlans", [])
-                        if v not in vinfo.get("untagged", [])
-                    ]
-                    port["mode"] = "trunk" if tagged else "access"
+                    if vinfo.get("pvid") is not None:
+                        port["pvid"] = vinfo["pvid"]
+                    # RouterOS fills dot1qPvid but leaves the static egress table
+                    # empty. With no membership data there is no evidence for
+                    # access versus trunk, and defaulting to `access` would label
+                    # a trunk carrying every VLAN as an access port - a wrong
+                    # answer that looks like a real one. Say nothing instead.
+                    if vlans := vinfo.get("vlans"):
+                        port["vlans"] = vlans
+                        tagged = [v for v in vlans if v not in vinfo.get("untagged", [])]
+                        port["mode"] = "trunk" if tagged else "access"
 
                 out_ports[pid] = port
 
@@ -457,16 +1057,18 @@ class SnmpClient:
                 "name": str(system_raw.get(OID_SYS_NAME, "")) or None,
                 "descr": str(system_raw.get(OID_SYS_DESCR, "")) or None,
                 "uptime": uptime // 100 if uptime is not None else None,
-                "cpu": _as_int(system_raw.get(OID_CPU)),
-                "mem_free": _as_int(system_raw.get(OID_MEM_FREE)),
-                "mem_used": _as_int(system_raw.get(OID_MEM_USED)),
+                "profile": self.profile.key,
+                "cpu": cpu,
+                "mem_free": mem_free,
+                "mem_used": mem_used,
                 "poe_budget": _as_int(next(iter(main_power.values()), None)),
                 "poe_used": _as_int(next(iter(main_cons.values()), None)),
                 "ports_up": sum(1 for p in out_ports.values() if p["link"]),
                 "ports_total": len(out_ports),
+                "wireless_clients": wireless.get("clients"),
             }
 
-        return {"system": system, "ports": out_ports}
+        return {"system": system, "ports": out_ports, "wireless": wireless}
 
 
 async def _selftest(host: str, community: str, port: int = 161) -> None:
